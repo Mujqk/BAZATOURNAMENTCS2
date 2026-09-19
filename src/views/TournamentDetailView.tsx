@@ -18,7 +18,8 @@ import {
   UserPlus,
   ExternalLink,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  RotateCw
 } from 'lucide-react';
 
 interface TournamentDetailViewProps {
@@ -138,12 +139,22 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
             )}
           </div>
 
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <button
+              onClick={loadDetails}
+              className="btn btn-secondary btn-sm"
+              title="Обновить данные турнира и заявки"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              <RotateCw size={14} className={isLoading ? 'spin-animate' : ''} />
+              Обновить
+            </button>
+
             {isRegOpen && !isFull && (
               isRegistered ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-                  <div className="badge badge-registration_open" style={{ padding: '0.65rem 1rem', fontSize: '0.85rem' }}>
-                    Вы уже зарегистрированы
+                  <div className="badge badge-registration_open" style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem' }}>
+                    Вы зарегистрированы
                   </div>
                   <button
                     onClick={handleCancelRegistration}
@@ -159,9 +170,10 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                     if (!user) loginWithDiscord();
                     else setShowRegisterModal(true);
                   }}
-                  className="btn btn-primary"
+                  className="btn btn-primary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                 >
-                  <Trophy size={16} />
+                  <Trophy size={15} />
                   Подать заявку на турнир
                 </button>
               )
@@ -299,6 +311,20 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
       {/* Tab Content: Teams & Members */}
       {activeTab === 'teams' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              Зарегистрировано команд: <strong>{teams.length}</strong> из <strong>{tournament.bracket_size}</strong>
+            </span>
+            <button
+              onClick={loadDetails}
+              className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              <RotateCw size={13} className={isLoading ? 'spin-animate' : ''} />
+              Обновить список
+            </button>
+          </div>
+
           {teams.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '3rem', background: 'var(--md-surface)', borderRadius: '12px' }}>
               <p style={{ color: 'var(--text-secondary)' }}>Пока никто не зарегистрировался на этот турнир.</p>
@@ -373,7 +399,9 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
         <TeammateFinder
           tournament={tournament}
           currentUser={user}
+          userTeam={userTeam}
           onLoginRequest={loginWithDiscord}
+          onTeamUpdated={loadDetails}
         />
       )}
 

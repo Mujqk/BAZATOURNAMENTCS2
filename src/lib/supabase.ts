@@ -353,6 +353,60 @@ export async function cancelTeamRegistration(teamId: string) {
   demoStore.save();
 }
 
+export async function addTeamMember(
+  teamId: string,
+  member: {
+    steam_id: string;
+    faceit_nickname: string | null;
+    faceit_level: number | null;
+    faceit_elo: number | null;
+    is_captain?: boolean;
+  }
+) {
+  if (supabase) {
+    const { error } = await supabase.from('team_members').insert({
+      team_id: teamId,
+      steam_id: member.steam_id,
+      faceit_nickname: member.faceit_nickname,
+      faceit_level: member.faceit_level,
+      faceit_elo: member.faceit_elo,
+      is_captain: Boolean(member.is_captain),
+    });
+    if (error) throw error;
+    return;
+  }
+
+  const team = demoStore.teams.find((t) => t.id === teamId);
+  if (team) {
+    if (!team.members) team.members = [];
+    team.members.push({
+      id: `m-${Date.now()}`,
+      team_id: teamId,
+      steam_id: member.steam_id,
+      faceit_nickname: member.faceit_nickname,
+      faceit_level: member.faceit_level,
+      faceit_elo: member.faceit_elo,
+      is_captain: Boolean(member.is_captain),
+    });
+    demoStore.save();
+  }
+}
+
+export async function removeTeamMember(memberId: string) {
+  if (supabase) {
+    const { error } = await supabase.from('team_members').delete().eq('id', memberId);
+    if (error) throw error;
+    return;
+  }
+
+  for (const team of demoStore.teams) {
+    if (team.members) {
+      team.members = team.members.filter((m) => m.id !== memberId);
+    }
+  }
+  demoStore.save();
+}
+
 export async function generateBracket(tournamentId: string, seedType: 'random' | 'faceit_elo' = 'random') {
   if (supabase) {
     const { error } = await supabase.rpc('generate_bracket', {

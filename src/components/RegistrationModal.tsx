@@ -114,21 +114,37 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       return;
     }
 
-    // 2. Validation: All Steam IDs present and 17 digits, nicknames filled
-    for (let i = 0; i < members.length; i++) {
+    // 2. Validation: Captain (member #0) is required
+    const captain = members[0];
+    if (!captain || !captain.steamId || !/^\d{17}$/.test(captain.steamId.trim())) {
+      setFormError('Укажите корректный SteamID64 (17 цифр) для капитана');
+      return;
+    }
+    if (!captain.nickname.trim()) {
+      setFormError('Укажите никнейм капитана');
+      return;
+    }
+
+    // Teammates (#1..N) are OPTIONAL for 2x2 and 5x5
+    const filledTeammates: MemberFormState[] = [];
+    for (let i = 1; i < members.length; i++) {
       const m = members[i];
-      if (!m.steamId || !/^\d{17}$/.test(m.steamId)) {
-        setFormError(`Укажите корректный SteamID64 (17 цифр) для игрока #${i + 1}`);
-        return;
-      }
-      if (!m.nickname.trim()) {
-        setFormError(`Укажите игровой никнейм для игрока #${i + 1}`);
-        return;
+      const hasSteam = Boolean(m.steamId && m.steamId.trim());
+      const hasNick = Boolean(m.nickname && m.nickname.trim());
+
+      if (hasSteam || hasNick) {
+        if (!m.steamId || !/^\d{17}$/.test(m.steamId.trim())) {
+          setFormError(`Укажите корректный SteamID64 (17 цифр) для игрока #${i + 1} или оставьте поле пустым`);
+          return;
+        }
+        filledTeammates.push(m);
       }
     }
 
+    const activeMembers = [captain, ...filledTeammates];
+
     // Check duplicate Steam IDs in the same team
-    const steamIds = members.map((m) => m.steamId);
+    const steamIds = activeMembers.map((m) => m.steamId.trim());
     if (new Set(steamIds).size !== steamIds.length) {
       setFormError('В заявке не должно быть повторяющихся Steam ID');
       return;
@@ -136,9 +152,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const payloadMembers = members.map((m, idx) => ({
-        steam_id: m.steamId,
-        faceit_nickname: m.nickname.trim() || m.lookup?.faceit_nickname || `Игрок ${idx + 1}`,
+      const payloadMembers = activeMembers.map((m, idx) => ({
+        steam_id: m.steamId.trim(),
+        faceit_nickname: m.nickname.trim() || m.lookup?.faceit_nickname || (m.isCaptain ? currentUser.discord_username : `Игрок ${idx + 1}`),
         faceit_level: m.lookup?.faceit_level || null,
         faceit_elo: m.lookup?.faceit_elo || null,
         is_captain: m.isCaptain,
@@ -205,10 +221,23 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
               />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                {is1x1 ? 'Данные игрока' : `Состав команды (${members.length} игр.)`}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {is1x1 ? 'Данные игрока' : `Состав команды (${members.length} сл.)`}
+                </span>
+                {!is1x1 && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-primary)' }}>
+                    Тимейтов можно добавить позже
+                  </span>
+                )}
               </div>
+
+              {!is1x1 && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', background: 'rgba(208, 188, 255, 0.06)', border: '1px solid rgba(208, 188, 255, 0.15)', padding: '0.55rem 0.85rem', borderRadius: '10px' }}>
+                  Указывать тиммейтов сразу не обязательно — зарегистрируйте команду сейчас, а свободных игроков можно будет пригласить позже через вкладку «Поиск тиммейтов».
+                </div>
+              )}
 
               {members.map((m, idx) => (
                 <div key={idx} className="member-input-row" style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
@@ -224,33 +253,33 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                   {/* Nickname input */}
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                      Никнейм игрока <span style={{ color: 'var(--accent-orange)' }}>*</span>
+                      Никнейм игрока {m.isCaptain ? <span style={{ color: 'var(--accent-orange)' }}>*</span> : <span style={{ color: 'var(--text-muted)' }}>(необязательно)</span>}
                     </label>
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="Игровой никнейм (любой)"
+                      placeholder={m.isCaptain ? "Игровой никнейм" : "Можно оставить пустым"}
                       value={m.nickname}
                       onChange={(e) => handleNicknameChange(idx, e.target.value)}
                       maxLength={24}
-                      required
+                      required={m.isCaptain}
                     />
                   </div>
 
                   {/* SteamID64 & Faceit lookup */}
                   <div>
                     <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                      SteamID64 (17 цифр) <span style={{ color: 'var(--accent-orange)' }}>*</span>
+                      SteamID64 (17 цифр) {m.isCaptain ? <span style={{ color: 'var(--accent-orange)' }}>*</span> : <span style={{ color: 'var(--text-muted)' }}>(необязательно)</span>}
                     </label>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="76561198000000000"
+                        placeholder={m.isCaptain ? "76561198000000000" : "76561198000000000 (можно добавить позже)"}
                         value={m.steamId}
                         onChange={(e) => handleSteamIdChange(idx, e.target.value)}
                         maxLength={17}
-                        required
+                        required={m.isCaptain}
                       />
                       <button
                         type="button"

@@ -1,29 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import type { Tournament, LfgRequest, Profile } from '../types/database.types';
-import { fetchLfgRequests, createLfgRequest, deleteLfgRequest } from '../lib/supabase';
+import type { Tournament, LfgRequest, Profile, Team } from '../types/database.types';
+import { fetchLfgRequests, createLfgRequest, deleteLfgRequest, addTeamMember } from '../lib/supabase';
+import { lookupFaceitPlayer } from '../lib/faceit';
 import { FaceitBadge } from './FaceitBadge';
-import { Users, Plus, Trash2, Copy, Check, Crosshair, AlertCircle, Loader2 } from 'lucide-react';
+import {
+  Users,
+  Plus,
+  Trash2,
+  Copy,
+  Check,
+  Crosshair,
+  AlertCircle,
+  Loader2,
+  RotateCw,
+  UserPlus,
+  MessageSquare,
+  X
+} from 'lucide-react';
 
 interface TeammateFinderProps {
   tournament: Tournament;
   currentUser: Profile | null;
+  userTeam?: Team | null;
   onLoginRequest: () => void;
+  onTeamUpdated?: () => void;
 }
 
 export const TeammateFinder: React.FC<TeammateFinderProps> = ({
   tournament,
   currentUser,
+  userTeam,
   onLoginRequest,
+  onTeamUpdated,
 }) => {
   const [requests, setRequests] = useState<LfgRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Form State
+  // Invite modal state
+  const [invitingRequest, setInvitingRequest] = useState<LfgRequest | null>(null);
+  const [inviteSteamId, setInviteSteamId] = useState('');
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [copiedInviteText, setCopiedInviteText] = useState(false);
+
+  // Form State for creating LFG request
   const [nickname, setNickname] = useState(currentUser?.discord_username || '');
   const [discordTag, setDiscordTag] = useState(currentUser?.discord_username || '');
   const [role, setRole] = useState('Любая');
+  const [steamId, setSteamId] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +96,16 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
     setIsSubmitting(true);
     setError(null);
 
+    let faceitLevel: number | null = null;
+    let faceitElo: number | null = null;
+    if (steamId.trim() && /^\d{17}$/.test(steamId.trim())) {
+      try {
+        const lookup = await lookupFaceitPlayer(steamId.trim());
+        faceitLevel = lookup.faceit_level || null;
+        faceitElo = lookup.faceit_elo || null;
+      } catch {}
+    }
+
     try {
       await createLfgRequest({
         tournament_id: tournament.id,
@@ -76,11 +113,15 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
         nickname: nickname.trim(),
         discord_tag: discordTag.trim(),
         role,
+        steam_id: steamId.trim() || null,
+        faceit_level: faceitLevel,
+        faceit_elo: faceitElo,
         description: description.trim() || null,
       });
 
       setShowModal(false);
       setDescription('');
+      setSteamId('');
       await loadRequests();
     } catch (err) {
       setError((err as Error).message);
@@ -98,6 +139,62 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
       alert('Ошибка при удалении анкеты: ' + (err as Error).message);
     }
   };
+
+  const handleAddPlayerToTeam = async (targetPlayer: LfgRequest, targetSteamId: string) => {
+    if (!userTeam) return;
+    const cleanSteam = targetSteamId.trim();
+    if (!cleanSteam || !/^\d{17}$/.test(cleanSteam)) {
+      setInviteError('Укажите корректный SteamID64 (17 цифр)');
+      return;
+    }
+
+    setIsInviting(true);
+    setInviteError(null);
+    try {
+      let faceitLevel = targetPlayer.faceit_level || null;
+      let faceitElo = targetPlayer.faceit_elo || null;
+      let faceitNick = targetPlayer.nickname;
+
+      try {
+        const l = await lookupFaceitPlayer(cleanSteam);
+        if (l.faceit_level) faceitLevel = l.faceit_level;
+        if (l.faceit_elo) faceitElo = l.faceit_elo;
+        if (l.faceit_nickname) faceitNick = l.faceit_nickname;
+      } catch {}
+
+      await addTeamMember(userTeam.id, {
+        steam_id: cleanSteam,
+        faceit_nickname: faceitNick || targetPlayer.nickname,
+        faceit_level: faceitLevel,
+        faceit_elo: faceitElo,
+        is_captain: false,
+      });
+
+      setInviteSuccess(`Игрок ${targetPlayer.nickname} успешно добавлен в команду!`);
+      if (onTeamUpdated) onTeamUpdated();
+      setTimeout(() => {
+        setInvitingRequest(null);
+        setInviteSuccess(null);
+        setInviteSteamId('');
+      }, 1500);
+    } catch (err) {
+      setInviteError((err as Error).message);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleCopyInviteMessage = (targetPlayer: LfgRequest) => {
+    if (!userTeam) return;
+    const msg = `Привет, ${targetPlayer.nickname}! Я капитан команды "${userTeam.name || 'Команда'}" на турнире "${tournament.title}". Приглашаю тебя в наш состав! Мой Discord: ${currentUser?.discord_username || ''}.`;
+    navigator.clipboard.writeText(msg);
+    setCopiedInviteText(true);
+    setTimeout(() => setCopiedInviteText(false), 2500);
+  };
+
+  const maxMembers = tournament.format === '1x1' ? 1 : tournament.format === '2x2' ? 2 : 5;
+  const currentMembersCount = userTeam?.members ? userTeam.members.length : (userTeam ? 1 : 0);
+  const isTeamFull = currentMembersCount >= maxMembers;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -127,31 +224,43 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
           </p>
         </div>
 
-        {userRequest ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
           <button
-            onClick={() => handleDelete(userRequest.id)}
+            onClick={loadRequests}
             className="btn btn-secondary btn-sm"
-            style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+            title="Обновить список анкет"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <Trash2 size={14} />
-            Удалить мою анкету
+            <RotateCw size={14} className={isLoading ? 'spin-animate' : ''} />
+            Обновить
           </button>
-        ) : (
-          <button
-            onClick={() => {
-              if (!currentUser) onLoginRequest();
-              else {
-                setNickname(currentUser.discord_username);
-                setDiscordTag(currentUser.discord_username);
-                setShowModal(true);
-              }
-            }}
-            className="btn btn-primary btn-sm"
-          >
-            <Plus size={15} />
-            Оставить анкету (Ищу команду)
-          </button>
-        )}
+
+          {userRequest ? (
+            <button
+              onClick={() => handleDelete(userRequest.id)}
+              className="btn btn-secondary btn-sm"
+              style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+            >
+              <Trash2 size={14} />
+              Удалить мою анкету
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (!currentUser) onLoginRequest();
+                else {
+                  setNickname(currentUser.discord_username);
+                  setDiscordTag(currentUser.discord_username);
+                  setShowModal(true);
+                }
+              }}
+              className="btn btn-primary btn-sm"
+            >
+              <Plus size={15} />
+              Оставить анкету (Ищу команду)
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Requests Grid */}
@@ -270,8 +379,8 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                   </p>
                 )}
 
-                {/* Discord copy button */}
-                <div style={{ marginTop: 'auto', paddingTop: '0.4rem' }}>
+                {/* Action buttons */}
+                <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.45rem', paddingTop: '0.4rem' }}>
                   <button
                     onClick={() => handleCopyDiscord(r.discord_tag, r.id)}
                     className={`btn ${isCopied ? 'btn-primary' : 'btn-secondary'} btn-sm`}
@@ -289,6 +398,23 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                       </>
                     )}
                   </button>
+
+                  {/* Invite to team button (visible to captains) */}
+                  {userTeam && !isMe && (
+                    <button
+                      onClick={() => {
+                        setInvitingRequest(r);
+                        setInviteSteamId(r.steam_id || '');
+                        setInviteError(null);
+                        setInviteSuccess(null);
+                      }}
+                      className="btn btn-primary btn-sm"
+                      style={{ width: '100%', justifyContent: 'center', background: 'var(--md-primary-container)', color: 'var(--md-on-primary-container)' }}
+                    >
+                      <UserPlus size={14} />
+                      Пригласить в команду
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -310,7 +436,7 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                 Анкета поиска тиммейтов
               </div>
               <button onClick={() => setShowModal(false)} className="btn btn-secondary btn-sm" style={{ padding: '0.4rem' }}>
-                ✕
+                <X size={16} />
               </button>
             </div>
 
@@ -344,6 +470,18 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                     onChange={(e) => setDiscordTag(e.target.value)}
                     required
                     placeholder="Например: my_discord_tag"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">SteamID64 (17 цифр, необязательно)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={steamId}
+                    onChange={(e) => setSteamId(e.target.value.replace(/\D/g, ''))}
+                    maxLength={17}
+                    placeholder="76561198000000000 (позволит принять вас в 1 клик)"
                   />
                 </div>
 
@@ -399,6 +537,137 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Invite Player to Team */}
+      {invitingRequest && userTeam && (
+        <div className="modal-backdrop" onClick={() => setInvitingRequest(null)}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '480px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <UserPlus size={18} color="var(--md-primary)" />
+                Приглашение в состав команды
+              </div>
+              <button onClick={() => setInvitingRequest(null)} className="btn btn-secondary btn-sm" style={{ padding: '0.4rem' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {inviteSuccess ? (
+                <div className="alert-box alert-info" style={{ borderColor: 'var(--md-success)' }}>
+                  <Check size={18} color="var(--md-success)" />
+                  <span style={{ color: 'var(--md-success)', fontWeight: 600 }}>{inviteSuccess}</span>
+                </div>
+              ) : (
+                <>
+                  {inviteError && (
+                    <div className="alert-box alert-error">
+                      <AlertCircle size={16} />
+                      <span>{inviteError}</span>
+                    </div>
+                  )}
+
+                  {/* Team status banner */}
+                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '0.85rem', borderRadius: '10px', border: '1px solid var(--glass-border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ваша команда:</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {userTeam.name || 'Моя команда'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: isTeamFull ? '#f87171' : 'var(--md-primary)', marginTop: '0.2rem' }}>
+                      Слоты: {currentMembersCount} из {maxMembers} игроков {isTeamFull ? '(Состав заполнен)' : '(Есть свободные места)'}
+                    </div>
+                  </div>
+
+                  {/* Target player info */}
+                  <div style={{ background: 'rgba(208, 188, 255, 0.05)', padding: '0.85rem', borderRadius: '10px', border: '1px solid rgba(208, 188, 255, 0.15)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Кого приглашаем:</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.25rem' }}>
+                      <span style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                        {invitingRequest.nickname}
+                      </span>
+                      <span className="badge badge-format">{invitingRequest.role}</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+                      Discord: <strong>{invitingRequest.discord_tag}</strong>
+                    </div>
+                  </div>
+
+                  {/* Option 1: Direct add to roster (if team has slots) */}
+                  {!isTeamFull && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Принять в команду официально (в турнирную сетку):
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="SteamID64 (17 цифр)"
+                          value={inviteSteamId}
+                          onChange={(e) => setInviteSteamId(e.target.value.replace(/\D/g, ''))}
+                          maxLength={17}
+                          disabled={isInviting}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={isInviting || inviteSteamId.length !== 17}
+                          onClick={() => handleAddPlayerToTeam(invitingRequest, inviteSteamId)}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {isInviting ? <Loader2 size={15} className="spin-animate" /> : 'Добавить'}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                        {invitingRequest.steam_id ? 'SteamID подставлен из анкеты игрока.' : 'Спросите у игрока его SteamID в Discord для официального внесения в состав.'}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Option 2: Copy Discord invitation message */}
+                  <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '0.85rem' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
+                      Связаться и позвать в Discord:
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyInviteMessage(invitingRequest)}
+                      className={`btn ${copiedInviteText ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      {copiedInviteText ? (
+                        <>
+                          <Check size={14} />
+                          Текст приглашения скопирован!
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare size={14} />
+                          Скопировать готовое сообщение для Discord
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setInvitingRequest(null)}
+                className="btn btn-secondary"
+              >
+                Закрыть
+              </button>
+            </div>
           </div>
         </div>
       )}
