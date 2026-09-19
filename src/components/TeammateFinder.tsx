@@ -93,18 +93,21 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
       return;
     }
 
+    if (!steamId.trim() || !/^\d{17}$/.test(steamId.trim())) {
+      setError('Пожалуйста, укажите корректный 17-значный SteamID64 (необходим для добавления в состав команды).');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     let faceitLevel: number | null = null;
     let faceitElo: number | null = null;
-    if (steamId.trim() && /^\d{17}$/.test(steamId.trim())) {
-      try {
-        const lookup = await lookupFaceitPlayer(steamId.trim());
-        faceitLevel = lookup.faceit_level || null;
-        faceitElo = lookup.faceit_elo || null;
-      } catch {}
-    }
+    try {
+      const lookup = await lookupFaceitPlayer(steamId.trim());
+      faceitLevel = lookup.faceit_level || null;
+      faceitElo = lookup.faceit_elo || null;
+    } catch {}
 
     try {
       await createLfgRequest({
@@ -113,7 +116,7 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
         nickname: nickname.trim(),
         discord_tag: discordTag.trim(),
         role,
-        steam_id: steamId.trim() || null,
+        steam_id: steamId.trim(),
         faceit_level: faceitLevel,
         faceit_elo: faceitElo,
         description: description.trim() || null,
@@ -474,15 +477,21 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">SteamID64 (17 цифр, необязательно)</label>
+                  <label className="form-label">
+                    SteamID64 (17 цифр) <span style={{ color: 'var(--accent-orange)' }}>*</span>
+                  </label>
                   <input
                     type="text"
                     className="form-input"
                     value={steamId}
                     onChange={(e) => setSteamId(e.target.value.replace(/\D/g, ''))}
                     maxLength={17}
-                    placeholder="76561198000000000 (позволит принять вас в 1 клик)"
+                    required
+                    placeholder="76561198000000000"
                   />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Необходим, чтобы капитаны команд могли принять вас в состав в один клик.
+                  </span>
                 </div>
 
                 <div className="form-group">
@@ -605,29 +614,49 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                       <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                         Принять в команду официально (в турнирную сетку):
                       </label>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="SteamID64 (17 цифр)"
-                          value={inviteSteamId}
-                          onChange={(e) => setInviteSteamId(e.target.value.replace(/\D/g, ''))}
-                          maxLength={17}
-                          disabled={isInviting}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          disabled={isInviting || inviteSteamId.length !== 17}
-                          onClick={() => handleAddPlayerToTeam(invitingRequest, inviteSteamId)}
-                          style={{ flexShrink: 0 }}
-                        >
-                          {isInviting ? <Loader2 size={15} className="spin-animate" /> : 'Добавить'}
-                        </button>
-                      </div>
-                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                        {invitingRequest.steam_id ? 'SteamID подставлен из анкеты игрока.' : 'Спросите у игрока его SteamID в Discord для официального внесения в состав.'}
-                      </span>
+                      {invitingRequest.steam_id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.04)', padding: '0.55rem 0.85rem', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+                            SteamID64 игрока: <strong style={{ color: 'var(--md-primary)' }}>{invitingRequest.steam_id}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={isInviting}
+                            onClick={() => handleAddPlayerToTeam(invitingRequest, invitingRequest.steam_id!)}
+                            style={{ width: '100%', justifyContent: 'center', padding: '0.7rem' }}
+                          >
+                            {isInviting ? <Loader2 size={16} className="spin-animate" /> : <UserPlus size={16} />}
+                            Принять {invitingRequest.nickname} в состав в 1 клик
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            В этой анкете не указан SteamID. Введите его вручную для зачисления:
+                          </span>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="SteamID64 (17 цифр)"
+                              value={inviteSteamId}
+                              onChange={(e) => setInviteSteamId(e.target.value.replace(/\D/g, ''))}
+                              maxLength={17}
+                              disabled={isInviting}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              disabled={isInviting || inviteSteamId.length !== 17}
+                              onClick={() => handleAddPlayerToTeam(invitingRequest, inviteSteamId)}
+                              style={{ flexShrink: 0 }}
+                            >
+                              {isInviting ? <Loader2 size={15} className="spin-animate" /> : 'Добавить'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
