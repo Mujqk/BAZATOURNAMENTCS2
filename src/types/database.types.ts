@@ -96,3 +96,26 @@ export interface LfgRequest {
   created_at: string;
   user?: Profile;
 }
+
+export type JoinRequestType = 'invite' | 'application';
+export type JoinRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
+
+export interface TeamJoinRequest {
+  id: string;
+  tournament_id: string;
+  team_id: string;
+  user_id: string;
+  type: JoinRequestType;
+  status: JoinRequestStatus;
+  nickname: string;
+  steam_id: string;
+  faceit_elo?: number | null;
+  faceit_level?: number | null;
+  role?: string | null;
+  message?: string | null;
+  created_at: string;
+  updated_at?: string;
+  team?: Team;
+  user?: Profile;
+}
+

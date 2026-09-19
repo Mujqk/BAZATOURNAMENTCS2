@@ -1,10 +1,12 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   Tournament,
+  TournamentFormat,
   Team,
   Match,
   Profile,
   LfgRequest,
+  TeamJoinRequest,
 } from '../types/database.types';
 import {
   INITIAL_DEMO_TOURNAMENTS,
@@ -70,6 +72,7 @@ class DemoStore {
   teams: Team[] = [];
   matches: Match[] = [];
   lfgRequests: LfgRequest[] = [];
+  teamJoinRequests: TeamJoinRequest[] = [];
 
   constructor() {
     this.load();
@@ -80,11 +83,13 @@ class DemoStore {
     const savedTeams = localStorage.getItem('demo_teams');
     const savedM = localStorage.getItem('demo_matches');
     const savedLfg = localStorage.getItem('demo_lfg');
+    const savedReqs = localStorage.getItem('demo_join_requests');
 
     this.tournaments = savedT ? JSON.parse(savedT) : [...INITIAL_DEMO_TOURNAMENTS];
     this.teams = savedTeams ? JSON.parse(savedTeams) : [...INITIAL_DEMO_TEAMS];
     this.matches = savedM ? JSON.parse(savedM) : [...INITIAL_DEMO_MATCHES];
     this.lfgRequests = savedLfg ? JSON.parse(savedLfg) : [];
+    this.teamJoinRequests = savedReqs ? JSON.parse(savedReqs) : [];
   }
 
   save() {
@@ -92,6 +97,7 @@ class DemoStore {
     localStorage.setItem('demo_teams', JSON.stringify(this.teams));
     localStorage.setItem('demo_matches', JSON.stringify(this.matches));
     localStorage.setItem('demo_lfg', JSON.stringify(this.lfgRequests));
+    localStorage.setItem('demo_join_requests', JSON.stringify(this.teamJoinRequests));
   }
 
   reset() {
@@ -99,6 +105,7 @@ class DemoStore {
     this.teams = [...INITIAL_DEMO_TEAMS];
     this.matches = [...INITIAL_DEMO_MATCHES];
     this.lfgRequests = [];
+    this.teamJoinRequests = [];
     this.save();
   }
 }
@@ -402,9 +409,24 @@ export async function addTeamMember(
     faceit_level: number | null;
     faceit_elo: number | null;
     is_captain?: boolean;
+  },
+  options?: {
+    maxMembers?: number;
+    tournamentId?: string;
+    userId?: string;
   }
 ) {
   if (supabase) {
+    if (options?.maxMembers) {
+      const { data: currentMembers } = await supabase
+        .from('team_members')
+        .select('id')
+        .eq('team_id', teamId);
+      if (currentMembers && currentMembers.length >= options.maxMembers) {
+        throw new Error(`Команда уже заполнена (максимум ${options.maxMembers} участников). Свободных мест больше нет.`);
+      }
+    }
+
     const { error } = await supabase.from('team_members').insert({
       team_id: teamId,
       steam_id: member.steam_id,
@@ -414,12 +436,21 @@ export async function addTeamMember(
       is_captain: Boolean(member.is_captain),
     });
     if (error) throw error;
+
+    if (options?.tournamentId) {
+      if (options.userId) await removeLfgRequestForUser(options.tournamentId, options.userId);
+      if (member.steam_id) await removeLfgRequestForUser(options.tournamentId, member.steam_id);
+    }
     return;
   }
 
   const team = demoStore.teams.find((t) => t.id === teamId);
   if (team) {
     if (!team.members) team.members = [];
+    if (options?.maxMembers && team.members.length >= options.maxMembers) {
+      throw new Error(`Команда уже заполнена (максимум ${options.maxMembers} участников). Свободных мест больше нет.`);
+    }
+
     team.members.push({
       id: `m-${Date.now()}`,
       team_id: teamId,
@@ -429,8 +460,22 @@ export async function addTeamMember(
       faceit_elo: member.faceit_elo,
       is_captain: Boolean(member.is_captain),
     });
+
+    if (options?.tournamentId) {
+      if (options.userId) {
+        demoStore.lfgRequests = demoStore.lfgRequests.filter(
+          (lfg) => !(lfg.tournament_id === options.tournamentId && lfg.user_id === options.userId)
+        );
+      }
+      if (member.steam_id) {
+        demoStore.lfgRequests = demoStore.lfgRequests.filter(
+          (lfg) => !(lfg.tournament_id === options.tournamentId && lfg.steam_id === member.steam_id)
+        );
+      }
+    }
     demoStore.save();
   }
+
 }
 
 export async function removeTeamMember(memberId: string) {
@@ -691,3 +736,276 @@ export async function deleteLfgRequest(requestId: string): Promise<void> {
   demoStore.lfgRequests = (demoStore.lfgRequests || []).filter((r: any) => r.id !== requestId);
   demoStore.save();
 }
+
+export async function removeLfgRequestForUser(tournamentId: string, userIdOrSteamId: string): Promise<void> {
+  if (!userIdOrSteamId) return;
+
+  if (supabase) {
+    try {
+      await supabase
+        .from('lfg_requests')
+        .delete()
+        .eq('tournament_id', tournamentId)
+        .or(`user_id.eq.${userIdOrSteamId},steam_id.eq.${userIdOrSteamId}`);
+    } catch (e) {
+      console.warn('Notice removing LFG request:', e);
+    }
+    return;
+  }
+
+  demoStore.lfgRequests = (demoStore.lfgRequests || []).filter(
+    (r) => !(r.tournament_id === tournamentId && (r.user_id === userIdOrSteamId || r.steam_id === userIdOrSteamId))
+  );
+  demoStore.save();
+}
+
+export async function updateLfgSteamId(
+  requestId: string,
+  steamId: string,
+  faceitLevel?: number | null,
+  faceitElo?: number | null
+): Promise<void> {
+  if (supabase) {
+    try {
+      const updates: any = { steam_id: steamId };
+      if (faceitLevel !== undefined) updates.faceit_level = faceitLevel;
+      if (faceitElo !== undefined) updates.faceit_elo = faceitElo;
+      await supabase.from('lfg_requests').update(updates).eq('id', requestId);
+    } catch (e) {
+      console.warn('Notice updating LFG steam id:', e);
+    }
+    return;
+  }
+
+  const req = (demoStore.lfgRequests || []).find((r) => r.id === requestId);
+  if (req) {
+    req.steam_id = steamId;
+    if (faceitLevel !== undefined) req.faceit_level = faceitLevel;
+    if (faceitElo !== undefined) req.faceit_elo = faceitElo;
+    demoStore.save();
+  }
+}
+
+// ==============================================================================
+// TEAM JOIN REQUESTS (Invites by Captain & Applications by Players)
+// ==============================================================================
+
+export async function fetchTeamJoinRequests(options: {
+  tournamentId: string;
+  teamId?: string;
+  userId?: string;
+}): Promise<TeamJoinRequest[]> {
+  if (supabase) {
+    try {
+      let query = supabase
+        .from('team_join_requests')
+        .select('*, team:teams(*), user:profiles(*)')
+        .eq('tournament_id', options.tournamentId);
+
+      if (options.teamId) {
+        query = query.eq('team_id', options.teamId);
+      }
+      if (options.userId) {
+        query = query.eq('user_id', options.userId);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (!error && data) return data;
+      if (error) console.warn('team_join_requests fetch notice:', error.message);
+    } catch (err) {
+      console.warn('Fallback to local requests store:', err);
+    }
+  }
+
+  return (demoStore.teamJoinRequests || []).filter((r) => {
+    if (r.tournament_id !== options.tournamentId) return false;
+    if (options.teamId && r.team_id !== options.teamId) return false;
+    if (options.userId && r.user_id !== options.userId) return false;
+    return true;
+  });
+}
+
+export async function createTeamJoinRequest(
+  request: Omit<TeamJoinRequest, 'id' | 'created_at' | 'status'>
+): Promise<TeamJoinRequest> {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('team_join_requests')
+        .insert({
+          ...request,
+          status: 'pending',
+        })
+        .select('*, team:teams(*), user:profiles(*)')
+        .single();
+
+      if (!error && data) return data;
+      if (error) console.warn('createTeamJoinRequest notice:', error.message);
+    } catch (err) {
+      console.warn('Fallback createTeamJoinRequest to local:', err);
+    }
+  }
+
+  const newReq: TeamJoinRequest = {
+    ...request,
+    id: `req-${Date.now()}`,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
+  demoStore.teamJoinRequests = [newReq, ...(demoStore.teamJoinRequests || [])];
+  demoStore.save();
+  return newReq;
+}
+
+export async function cancelTeamJoinRequest(requestId: string): Promise<void> {
+  if (supabase) {
+    try {
+      await supabase
+        .from('team_join_requests')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', requestId);
+      return;
+    } catch (e) {
+      console.warn('Notice cancelling team join request:', e);
+    }
+  }
+
+  const req = (demoStore.teamJoinRequests || []).find((r) => r.id === requestId);
+  if (req) {
+    req.status = 'cancelled';
+    demoStore.save();
+  }
+}
+
+export async function respondToTeamJoinRequest(
+  requestId: string,
+  action: 'accept' | 'reject',
+  tournamentFormat: TournamentFormat
+): Promise<void> {
+  const maxMembers = tournamentFormat === '1x1' ? 1 : tournamentFormat === '2x2' ? 2 : 5;
+
+  if (supabase) {
+    try {
+      // 1. Fetch the request
+      const { data: req, error: reqErr } = await supabase
+        .from('team_join_requests')
+        .select('*')
+        .eq('id', requestId)
+        .single();
+
+      if (reqErr || !req) throw reqErr || new Error('Запрос не найден');
+
+      if (action === 'reject') {
+        await supabase
+          .from('team_join_requests')
+          .update({ status: 'rejected', updated_at: new Date().toISOString() })
+          .eq('id', requestId);
+        return;
+      }
+
+      // Action is 'accept': Check current member capacity
+      const { data: currentMembers } = await supabase
+        .from('team_members')
+        .select('id')
+        .eq('team_id', req.team_id);
+
+      const currentCount = currentMembers ? currentMembers.length : 0;
+      if (currentCount >= maxMembers) {
+        await supabase
+          .from('team_join_requests')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', requestId);
+        throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников). Свободных мест больше нет.`);
+      }
+
+      // Add to team members
+      const { error: insErr } = await supabase.from('team_members').insert({
+        team_id: req.team_id,
+        steam_id: req.steam_id,
+        faceit_nickname: req.nickname,
+        faceit_level: req.faceit_level,
+        faceit_elo: req.faceit_elo,
+        is_captain: false,
+      });
+      if (insErr) throw insErr;
+
+      // Mark request accepted
+      await supabase
+        .from('team_join_requests')
+        .update({ status: 'accepted', updated_at: new Date().toISOString() })
+        .eq('id', requestId);
+
+      // Remove applicant's LFG request so it disappears from "Поиск тиммейтов"
+      await removeLfgRequestForUser(req.tournament_id, req.user_id);
+      if (req.steam_id) {
+        await removeLfgRequestForUser(req.tournament_id, req.steam_id);
+      }
+
+      // If team is now completely full, cancel other pending invites/applications for this team
+      if (currentCount + 1 >= maxMembers) {
+        await supabase
+          .from('team_join_requests')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('team_id', req.team_id)
+          .eq('status', 'pending');
+      }
+
+      return;
+    } catch (err: any) {
+      if (err.message && err.message.includes('укомплектована')) {
+        throw err;
+      }
+      console.warn('respondToTeamJoinRequest Supabase notice:', err);
+    }
+  }
+
+  // Demo store fallback
+  const req = (demoStore.teamJoinRequests || []).find((r) => r.id === requestId);
+  if (!req) throw new Error('Запрос не найден');
+
+  if (action === 'reject') {
+    req.status = 'rejected';
+    demoStore.save();
+    return;
+  }
+
+  // Check team capacity in demoStore
+  const team = demoStore.teams.find((t) => t.id === req.team_id);
+  const currentCount = team?.members ? team.members.length : 1;
+  if (currentCount >= maxMembers) {
+    req.status = 'cancelled';
+    demoStore.save();
+    throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников). Свободных мест больше нет.`);
+  }
+
+  if (team) {
+    if (!team.members) team.members = [];
+    team.members.push({
+      id: `m-${Date.now()}`,
+      team_id: req.team_id,
+      steam_id: req.steam_id,
+      faceit_nickname: req.nickname,
+      faceit_level: req.faceit_level || null,
+      faceit_elo: req.faceit_elo || null,
+      is_captain: false,
+    });
+  }
+
+  req.status = 'accepted';
+  // Remove from demo LFG
+  demoStore.lfgRequests = demoStore.lfgRequests.filter(
+    (lfg) => !(lfg.tournament_id === req.tournament_id && (lfg.user_id === req.user_id || lfg.steam_id === req.steam_id))
+  );
+
+  // If team now full, cancel remaining pending
+  if (team && team.members && team.members.length >= maxMembers) {
+    demoStore.teamJoinRequests.forEach((r) => {
+      if (r.team_id === team.id && r.status === 'pending') {
+        r.status = 'cancelled';
+      }
+    });
+  }
+
+  demoStore.save();
+}
+

@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import type { Tournament, LfgRequest, Profile, Team } from '../types/database.types';
-import { fetchLfgRequests, createLfgRequest, deleteLfgRequest, addTeamMember } from '../lib/supabase';
+import {
+  fetchLfgRequests,
+  createLfgRequest,
+  deleteLfgRequest,
+  createTeamJoinRequest,
+  updateLfgSteamId,
+} from '../lib/supabase';
 import { lookupFaceitPlayer } from '../lib/faceit';
 import { FaceitBadge } from './FaceitBadge';
 import {
@@ -15,6 +21,7 @@ import {
   RotateCw,
   UserPlus,
   MessageSquare,
+  Mail,
   X
 } from 'lucide-react';
 
@@ -143,7 +150,7 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
     }
   };
 
-  const handleAddPlayerToTeam = async (targetPlayer: LfgRequest, targetSteamId: string) => {
+  const handleSendInviteToPlayer = async (targetPlayer: LfgRequest, targetSteamId: string) => {
     if (!userTeam) return;
     const cleanSteam = targetSteamId.trim();
     if (!cleanSteam || !/^\d{17}$/.test(cleanSteam)) {
@@ -165,21 +172,35 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
         if (l.faceit_nickname) faceitNick = l.faceit_nickname;
       } catch {}
 
-      await addTeamMember(userTeam.id, {
+      // If the LFG card did not have steam_id before, update it now so it persists permanently!
+      if (!targetPlayer.steam_id) {
+        await updateLfgSteamId(targetPlayer.id, cleanSteam, faceitLevel, faceitElo);
+        targetPlayer.steam_id = cleanSteam;
+        targetPlayer.faceit_level = faceitLevel;
+        targetPlayer.faceit_elo = faceitElo;
+      }
+
+      // Create formal invitation
+      await createTeamJoinRequest({
+        tournament_id: tournament.id,
+        team_id: userTeam.id,
+        user_id: targetPlayer.user_id,
+        type: 'invite',
+        nickname: faceitNick || targetPlayer.nickname,
         steam_id: cleanSteam,
-        faceit_nickname: faceitNick || targetPlayer.nickname,
         faceit_level: faceitLevel,
         faceit_elo: faceitElo,
-        is_captain: false,
+        role: targetPlayer.role,
+        message: `Приглашение в команду "${userTeam.name || 'Команда'}"`,
       });
 
-      setInviteSuccess(`Игрок ${targetPlayer.nickname} успешно добавлен в команду!`);
+      setInviteSuccess(`Приглашение отправлено игроку ${targetPlayer.nickname}! Игрок должен подтвердить вступление.`);
       if (onTeamUpdated) onTeamUpdated();
       setTimeout(() => {
         setInvitingRequest(null);
         setInviteSuccess(null);
         setInviteSteamId('');
-      }, 1500);
+      }, 2200);
     } catch (err) {
       setInviteError((err as Error).message);
     } finally {
@@ -608,11 +629,11 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                     </div>
                   </div>
 
-                  {/* Option 1: Direct add to roster (if team has slots) */}
+                  {/* Option 1: Send official team invitation */}
                   {!isTeamFull && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                       <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        Принять в команду официально (в турнирную сетку):
+                        Официальное приглашение в состав:
                       </label>
                       {invitingRequest.steam_id ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -623,17 +644,17 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                             type="button"
                             className="btn btn-primary"
                             disabled={isInviting}
-                            onClick={() => handleAddPlayerToTeam(invitingRequest, invitingRequest.steam_id!)}
+                            onClick={() => handleSendInviteToPlayer(invitingRequest, invitingRequest.steam_id!)}
                             style={{ width: '100%', justifyContent: 'center', padding: '0.7rem' }}
                           >
-                            {isInviting ? <Loader2 size={16} className="spin-animate" /> : <UserPlus size={16} />}
-                            Принять {invitingRequest.nickname} в состав в 1 клик
+                            {isInviting ? <Loader2 size={16} className="spin-animate" /> : <Mail size={16} />}
+                            Отправить приглашение игроку {invitingRequest.nickname}
                           </button>
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                           <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            В этой анкете не указан SteamID. Введите его вручную для зачисления:
+                            В этой анкете не был указан SteamID. Введите его для привязки и отправки приглашения:
                           </span>
                           <div style={{ display: 'flex', gap: '0.5rem' }}>
                             <input
@@ -649,14 +670,17 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                               type="button"
                               className="btn btn-primary btn-sm"
                               disabled={isInviting || inviteSteamId.length !== 17}
-                              onClick={() => handleAddPlayerToTeam(invitingRequest, inviteSteamId)}
+                              onClick={() => handleSendInviteToPlayer(invitingRequest, inviteSteamId)}
                               style={{ flexShrink: 0 }}
                             >
-                              {isInviting ? <Loader2 size={15} className="spin-animate" /> : 'Добавить'}
+                              {isInviting ? <Loader2 size={15} className="spin-animate" /> : 'Пригласить'}
                             </button>
                           </div>
                         </div>
                       )}
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Игрок получит уведомление в шапке турнира и должен нажать «Принять». После этого он зачислится в состав, а анкета поиска удалится.
+                      </span>
                     </div>
                   )}
 
