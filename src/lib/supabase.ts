@@ -298,6 +298,47 @@ export async function registerTeamAtomic(
       p_members: members,
     });
 
+    if (!error && data) {
+      return data;
+    }
+
+    // If RPC returned error about member count (because in 2x2/5x5 teammates are optional),
+    // fallback to direct table insert permitted by RLS:
+    if (error && (error.message?.includes('Invalid number of members') || error.message?.includes('expected'))) {
+      const { data: newTeam, error: teamErr } = await supabase
+        .from('teams')
+        .insert({
+          tournament_id: tournamentId,
+          name: teamName || (members[0]?.faceit_nickname ?? userProfile.discord_username),
+          captain_id: userProfile.id,
+        })
+        .select()
+        .single();
+
+      if (teamErr) throw teamErr;
+
+      if (members.length > 0) {
+        const membersPayload = members.map((m) => ({
+          team_id: newTeam.id,
+          steam_id: m.steam_id,
+          faceit_nickname: m.faceit_nickname,
+          faceit_level: m.faceit_level,
+          faceit_elo: m.faceit_elo,
+          is_captain: Boolean(m.is_captain),
+        }));
+
+        const { error: membersErr } = await supabase
+          .from('team_members')
+          .insert(membersPayload);
+
+        if (membersErr) {
+          console.warn('Member insertion warning:', membersErr);
+        }
+      }
+
+      return newTeam.id;
+    }
+
     if (error) throw error;
     return data;
   }

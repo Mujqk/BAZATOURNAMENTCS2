@@ -352,8 +352,8 @@ begin
     else 1
   end;
 
-  if jsonb_array_length(p_members) <> v_required_members then
-    raise exception 'Invalid number of members: expected %, got %',
+  if jsonb_array_length(p_members) < 1 or jsonb_array_length(p_members) > v_required_members then
+    raise exception 'Invalid number of members: expected between 1 and %, got %',
       v_required_members, jsonb_array_length(p_members);
   end if;
 
