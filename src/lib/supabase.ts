@@ -186,17 +186,38 @@ export async function createTournament(
   const initialStatus = new Date(params.registration_start) <= new Date() ? 'registration_open' : 'upcoming';
 
   if (supabase) {
-    const { data, error } = await supabase
+    const payload: any = {
+      ...params,
+      created_by: userProfile.id,
+      status: initialStatus,
+    };
+
+    let { data, error } = await supabase
       .from('tournaments')
-      .insert({
-        ...params,
-        created_by: userProfile.id,
-        status: initialStatus,
-      })
+      .insert(payload)
       .select('*, creator:profiles(*)')
       .single();
 
-    if (error) throw error;
+    // Graceful fallback: if database table is missing prize columns, insert without them
+    if (error && (error.message?.includes('prize_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
+      const { prize_first, prize_second, prize_third, ...legacyPayload } = payload;
+      const retry = await supabase
+        .from('tournaments')
+        .insert(legacyPayload)
+        .select('*, creator:profiles(*)')
+        .single();
+
+      if (retry.error) throw retry.error;
+      data = {
+        ...retry.data,
+        prize_first,
+        prize_second,
+        prize_third,
+      };
+    } else if (error) {
+      throw error;
+    }
+
     return data;
   }
 
@@ -220,10 +241,21 @@ export async function updateTournament(
   updates: Partial<Omit<Tournament, 'id' | 'created_at' | 'created_by' | 'teams_count'>>
 ): Promise<void> {
   if (supabase) {
-    const { error } = await supabase
+    let { error } = await supabase
       .from('tournaments')
       .update(updates)
       .eq('id', id);
+
+    if (error && (error.message?.includes('prize_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
+      const { prize_first, prize_second, prize_third, ...legacyUpdates } = updates as any;
+      const retry = await supabase
+        .from('tournaments')
+        .update(legacyUpdates)
+        .eq('id', id);
+
+      if (retry.error) throw retry.error;
+      return;
+    }
 
     if (error) throw error;
     return;
