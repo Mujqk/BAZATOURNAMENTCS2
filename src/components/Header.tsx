@@ -26,9 +26,6 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
         <div className="header-inner">
           {/* Brand: BAZA CS2 */}
           <div className="brand-logo" onClick={() => onNavigate('list')}>
-            <div className="brand-icon">
-              <img src="/favicon.svg" alt="BAZA CS2" style={{ width: '22px', height: '22px', display: 'block', objectFit: 'contain' }} />
-            </div>
             <div className="brand-title">
               BAZA <span>CS2</span>
             </div>
