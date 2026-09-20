@@ -28,6 +28,15 @@ export const AdminCreateTournamentView: React.FC<AdminCreateTournamentViewProps>
   const [prizeFirst, setPrizeFirst] = useState('');
   const [prizeSecond, setPrizeSecond] = useState('');
   const [prizeThird, setPrizeThird] = useState('');
+
+  // Flexible Faceit Rules
+  const [allowLvl10, setAllowLvl10] = useState(true);
+  const [maxLvl10PerTeam, setMaxLvl10PerTeam] = useState<string>('');
+  const [minFaceitLevel, setMinFaceitLevel] = useState<number>(1);
+  const [maxFaceitLevel, setMaxFaceitLevel] = useState<number>(10);
+  const [maxFaceitElo, setMaxFaceitElo] = useState<string>('');
+  const [minFaceitElo, setMinFaceitElo] = useState<string>('');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +64,11 @@ export const AdminCreateTournamentView: React.FC<AdminCreateTournamentViewProps>
       return;
     }
 
+    if (minFaceitLevel > maxFaceitLevel) {
+      setError('Минимальный уровень Faceit не может быть больше максимального уровня.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const newTournament = await createTournament(
@@ -68,6 +82,12 @@ export const AdminCreateTournamentView: React.FC<AdminCreateTournamentViewProps>
           prize_first: prizeFirst.trim() || null,
           prize_second: prizeSecond.trim() || null,
           prize_third: prizeThird.trim() || null,
+          allow_lvl10: allowLvl10,
+          max_lvl10_per_team: !allowLvl10 ? 0 : (maxLvl10PerTeam ? parseInt(maxLvl10PerTeam, 10) : null),
+          min_faceit_level: minFaceitLevel,
+          max_faceit_level: maxFaceitLevel,
+          min_faceit_elo: minFaceitElo.trim() ? parseInt(minFaceitElo.trim(), 10) : null,
+          max_faceit_elo: maxFaceitElo.trim() ? parseInt(maxFaceitElo.trim(), 10) : null,
           created_by: user.id,
         },
         user
@@ -210,6 +230,132 @@ export const AdminCreateTournamentView: React.FC<AdminCreateTournamentViewProps>
                 onChange={(e) => setTournStart(e.target.value)}
                 required
               />
+            </div>
+          </div>
+
+          {/* Flexible Faceit Rules Section */}
+          <div
+            style={{
+              background: 'rgba(255, 85, 0, 0.04)',
+              border: '1px solid rgba(255, 85, 0, 0.25)',
+              borderRadius: '12px',
+              padding: '1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ background: '#ff5500', color: '#000', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 800 }}>FACEIT</span>
+                Регламент Faceit и ограничения состава
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                Настройте баланс турнира: разрешенные уровни, запрет 10-х уровней или лимит на команду, а также порог максимального ELO.
+              </div>
+            </div>
+
+            {/* 10 LVL Switcher & Limit */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label">Участие 10 уровня Faceit</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setAllowLvl10(true)}
+                    className={`btn ${allowLvl10 ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    style={{ flex: 1, justifyContent: 'center' }}
+                  >
+                    Разрешены
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAllowLvl10(false);
+                      setMaxLvl10PerTeam('0');
+                    }}
+                    className={`btn ${!allowLvl10 ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    style={{ flex: 1, justifyContent: 'center', borderColor: !allowLvl10 ? 'var(--md-primary)' : undefined }}
+                  >
+                    Запрет 10 lvl
+                  </button>
+                </div>
+              </div>
+
+              {allowLvl10 && format !== '1x1' && (
+                <div className="form-group">
+                  <label className="form-label">Максимум 10 lvl в одной команде</label>
+                  <select
+                    className="form-select"
+                    value={maxLvl10PerTeam}
+                    onChange={(e) => setMaxLvl10PerTeam(e.target.value)}
+                  >
+                    <option value="">Без ограничений (любое кол-во)</option>
+                    <option value="1">Не более 1 игрока (1x 10 lvl)</option>
+                    <option value="2">Не более 2 игроков (2x 10 lvl)</option>
+                    {format === '5x5' && <option value="3">Не более 3 игроков (3x 10 lvl)</option>}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Allowed Faceit Level Range */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label">Минимальный уровень Faceit (1-10)</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  min={1}
+                  max={10}
+                  value={minFaceitLevel}
+                  onChange={(e) => setMinFaceitLevel(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Максимальный уровень Faceit (1-10)</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  min={1}
+                  max={10}
+                  value={maxFaceitLevel}
+                  onChange={(e) => setMaxFaceitLevel(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 10)))}
+                />
+              </div>
+            </div>
+
+            {/* Faceit ELO Limits */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label">
+                  <span>Максимальное Faceit ELO (отсечь 3500+ киборгов)</span>
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="напр. 2500 или 3000 (пусто = без лимита)"
+                  value={maxFaceitElo}
+                  onChange={(e) => setMaxFaceitElo(e.target.value)}
+                />
+                <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                  Игроки с ELO выше указанного порога не смогут быть зарегистрированы.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  <span>Минимальное Faceit ELO (опционально)</span>
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="напр. 1000 (пусто = без лимита)"
+                  value={minFaceitElo}
+                  onChange={(e) => setMinFaceitElo(e.target.value)}
+                />
+              </div>
             </div>
           </div>
 

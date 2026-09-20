@@ -20,9 +20,12 @@ import {
   CheckSquare,
   Square,
   X,
-  Loader2
+  Loader2,
+  Ban
 } from 'lucide-react';
 import { AdminEditTournamentModal } from './AdminEditTournamentModal';
+import { AdminBlacklistModal } from './AdminBlacklistModal';
+import { useAuth } from '../context/AuthContext';
 
 interface AdminControlsProps {
   tournament: Tournament;
@@ -37,10 +40,12 @@ export const AdminControls: React.FC<AdminControlsProps> = ({
   onRefresh,
   onDeleted,
 }) => {
+  const { user } = useAuth();
   const [seedType, setSeedType] = useState<'random' | 'faceit_elo'>('random');
   const [isLoading, setIsLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showBlacklistModal, setShowBlacklistModal] = useState(false);
 
   // Double confirmation modal state
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -145,6 +150,16 @@ export const AdminControls: React.FC<AdminControlsProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             className="btn btn-secondary btn-sm"
+            onClick={() => setShowBlacklistModal(true)}
+            title="Черный список участников"
+            style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)' }}
+          >
+            <Ban size={14} />
+            Черный список
+          </button>
+
+          <button
+            className="btn btn-secondary btn-sm"
             onClick={() => setShowEditModal(true)}
             title="Редактировать параметры турнира или удалить"
           >
@@ -173,6 +188,15 @@ export const AdminControls: React.FC<AdminControlsProps> = ({
           ) : null}
         </div>
       </div>
+
+      {showBlacklistModal && user && (
+        <AdminBlacklistModal
+          tournament={tournament}
+          currentUser={user}
+          onClose={() => setShowBlacklistModal(false)}
+          onUpdated={onRefresh}
+        />
+      )}
 
       {showEditModal && (
         <AdminEditTournamentModal

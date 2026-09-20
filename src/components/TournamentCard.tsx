@@ -45,6 +45,26 @@ export const TournamentCard: React.FC<TournamentCardProps> = ({
         <div className="card-badges">
           <span className="badge badge-format">CS2 {tournament.format}</span>
           <span className={`badge ${statusInfo.class}`}>{statusInfo.label}</span>
+          {tournament.allow_lvl10 === false && (
+            <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)', fontWeight: 600 }}>
+              🚫 Без 10 lvl
+            </span>
+          )}
+          {tournament.allow_lvl10 !== false && tournament.max_lvl10_per_team && (
+            <span className="badge" style={{ background: 'rgba(255, 85, 0, 0.12)', color: '#ff7733', borderColor: 'rgba(255, 85, 0, 0.3)', fontWeight: 600 }}>
+              ⭐ Макс. {tournament.max_lvl10_per_team}x 10 lvl
+            </span>
+          )}
+          {tournament.max_faceit_elo && (
+            <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)', fontWeight: 600 }}>
+              ⚡ До {tournament.max_faceit_elo} ELO
+            </span>
+          )}
+          {((tournament.min_faceit_level && tournament.min_faceit_level > 1) || (tournament.max_faceit_level && tournament.max_faceit_level < 10)) && (
+            <span className="badge badge-format" style={{ fontWeight: 600 }}>
+              🎯 {tournament.min_faceit_level || 1}-{tournament.max_faceit_level || 10} lvl
+            </span>
+          )}
           {tournament.prize_first && (
             <span className="badge" style={{ background: 'rgba(255, 215, 0, 0.12)', color: '#ffd700', borderColor: 'rgba(255, 215, 0, 0.3)' }}>
               1-е место: {tournament.prize_first}

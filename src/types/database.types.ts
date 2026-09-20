@@ -33,6 +33,12 @@ export interface Tournament {
   prize_first?: string | null;
   prize_second?: string | null;
   prize_third?: string | null;
+  allow_lvl10?: boolean;
+  max_lvl10_per_team?: number | null;
+  min_faceit_level?: number;
+  max_faceit_level?: number;
+  min_faceit_elo?: number | null;
+  max_faceit_elo?: number | null;
 }
 
 export interface TeamMember {
@@ -117,5 +123,18 @@ export interface TeamJoinRequest {
   updated_at?: string;
   team?: Team;
   user?: Profile;
+}
+
+export interface TournamentBlacklistEntry {
+  id: string;
+  user_id?: string | null;
+  steam_id?: string | null;
+  discord_username?: string | null;
+  reason?: string | null;
+  tournament_id?: string | null; // null = global ban
+  banned_by: string;
+  created_at: string;
+  user?: Profile;
+  banner?: Profile;
 }
 

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import type { Tournament, FaceitPlayerLookup, Profile } from '../types/database.types';
 import { lookupFaceitPlayer } from '../lib/faceit';
-import { registerTeamAtomic } from '../lib/supabase';
+import { registerTeamAtomic, checkIsUserBanned, validateFaceitTournamentRules } from '../lib/supabase';
 import { FaceitBadge } from './FaceitBadge';
-import { X, AlertCircle, Loader2, Users, Trophy } from 'lucide-react';
+import { X, AlertCircle, Loader2, Users, Trophy, ShieldAlert } from 'lucide-react';
 
 interface RegistrationModalProps {
   tournament: Tournament;
@@ -152,6 +152,63 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      // 1. Check blacklist for captain and all team members
+      const captainBan = await checkIsUserBanned({
+        userId: currentUser.id,
+        steamId: captain.steamId.trim(),
+        tournamentId: tournament.id,
+      });
+      if (captainBan.isBanned) {
+        setFormError(`Вы не можете зарегистрироваться на турнир: ${captainBan.reason || 'в черном списке'}`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      for (const m of activeMembers) {
+        const mBan = await checkIsUserBanned({
+          steamId: m.steamId.trim(),
+          tournamentId: tournament.id,
+        });
+        if (mBan.isBanned) {
+          setFormError(`Игрок ${m.nickname || m.steamId} находится в черном списке турнира: ${mBan.reason || 'блокировка'}`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // 2. Validate Tournament Faceit Rules (allow 10, max 10s, min/max level, max ELO)
+      let lvl10Count = 0;
+      for (const m of activeMembers) {
+        const lvl = m.lookup?.faceit_level;
+        const elo = m.lookup?.faceit_elo;
+        const nick = m.nickname.trim() || 'Игрок';
+
+        if (lvl === 10) lvl10Count++;
+
+        const validation = validateFaceitTournamentRules(tournament, {
+          faceit_level: lvl,
+          faceit_elo: elo,
+          nickname: nick,
+        });
+        if (!validation.valid) {
+          setFormError(validation.error || 'Нарушение правил Faceit для турнира');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      if (
+        tournament.max_lvl10_per_team !== null &&
+        tournament.max_lvl10_per_team !== undefined &&
+        lvl10Count > tournament.max_lvl10_per_team
+      ) {
+        setFormError(
+          `В вашей команде ${lvl10Count} игроков 10 уровня Faceit. По регламенту турнира разрешено максимум ${tournament.max_lvl10_per_team} в составе!`
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
       const payloadMembers = activeMembers.map((m, idx) => ({
         steam_id: m.steamId.trim(),
         faceit_nickname: m.nickname.trim() || m.lookup?.faceit_nickname || (m.isCaptain ? currentUser.discord_username : `Игрок ${idx + 1}`),
@@ -171,6 +228,14 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
   };
 
+  const hasRules = Boolean(
+    tournament.allow_lvl10 === false ||
+    tournament.max_lvl10_per_team ||
+    tournament.max_faceit_elo ||
+    (tournament.min_faceit_level && tournament.min_faceit_level > 1) ||
+    (tournament.max_faceit_level && tournament.max_faceit_level < 10)
+  );
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -186,6 +251,48 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
+            {/* Tournament Rules Banner */}
+            {hasRules && (
+              <div
+                style={{
+                  background: 'rgba(255, 85, 0, 0.08)',
+                  border: '1px solid rgba(255, 85, 0, 0.3)',
+                  borderRadius: '10px',
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.35rem',
+                  fontSize: '0.82rem',
+                }}
+              >
+                <div style={{ fontWeight: 700, color: '#ff7733', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <ShieldAlert size={15} /> Ограничения регламента турнира:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.15rem' }}>
+                  {tournament.allow_lvl10 === false && (
+                    <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+                      🚫 Запрет 10 уровня Faceit
+                    </span>
+                  )}
+                  {tournament.allow_lvl10 !== false && tournament.max_lvl10_per_team && (
+                    <span className="badge" style={{ background: 'rgba(255, 85, 0, 0.2)', color: '#ffaa66' }}>
+                      ⭐ Макс. {tournament.max_lvl10_per_team}x 10 lvl в команде
+                    </span>
+                  )}
+                  {tournament.max_faceit_elo && (
+                    <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd' }}>
+                      ⚡ Макс. ELO: {tournament.max_faceit_elo}
+                    </span>
+                  )}
+                  {((tournament.min_faceit_level && tournament.min_faceit_level > 1) || (tournament.max_faceit_level && tournament.max_faceit_level < 10)) && (
+                    <span className="badge badge-format">
+                      🎯 Уровни: {tournament.min_faceit_level || 1}-{tournament.max_faceit_level || 10} lvl
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="alert-box alert-info">
               <Users size={18} style={{ flexShrink: 0 }} />
               <div>

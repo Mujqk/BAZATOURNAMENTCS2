@@ -7,6 +7,7 @@ import type {
   Profile,
   LfgRequest,
   TeamJoinRequest,
+  TournamentBlacklistEntry,
 } from '../types/database.types';
 import {
   INITIAL_DEMO_TOURNAMENTS,
@@ -73,6 +74,7 @@ class DemoStore {
   matches: Match[] = [];
   lfgRequests: LfgRequest[] = [];
   teamJoinRequests: TeamJoinRequest[] = [];
+  blacklist: TournamentBlacklistEntry[] = [];
 
   constructor() {
     this.load();
@@ -84,12 +86,14 @@ class DemoStore {
     const savedM = localStorage.getItem('demo_matches');
     const savedLfg = localStorage.getItem('demo_lfg');
     const savedReqs = localStorage.getItem('demo_join_requests');
+    const savedB = localStorage.getItem('demo_blacklist');
 
     this.tournaments = savedT ? JSON.parse(savedT) : [...INITIAL_DEMO_TOURNAMENTS];
     this.teams = savedTeams ? JSON.parse(savedTeams) : [...INITIAL_DEMO_TEAMS];
     this.matches = savedM ? JSON.parse(savedM) : [...INITIAL_DEMO_MATCHES];
     this.lfgRequests = savedLfg ? JSON.parse(savedLfg) : [];
     this.teamJoinRequests = savedReqs ? JSON.parse(savedReqs) : [];
+    this.blacklist = savedB ? JSON.parse(savedB) : [];
   }
 
   save() {
@@ -98,6 +102,7 @@ class DemoStore {
     localStorage.setItem('demo_matches', JSON.stringify(this.matches));
     localStorage.setItem('demo_lfg', JSON.stringify(this.lfgRequests));
     localStorage.setItem('demo_join_requests', JSON.stringify(this.teamJoinRequests));
+    localStorage.setItem('demo_blacklist', JSON.stringify(this.blacklist));
   }
 
   reset() {
@@ -106,6 +111,7 @@ class DemoStore {
     this.matches = [...INITIAL_DEMO_MATCHES];
     this.lfgRequests = [];
     this.teamJoinRequests = [];
+    this.blacklist = [];
     this.save();
   }
 }
@@ -205,9 +211,13 @@ export async function createTournament(
       .select('*, creator:profiles(*)')
       .single();
 
-    // Graceful fallback: if database table is missing prize columns, insert without them
-    if (error && (error.message?.includes('prize_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
-      const { prize_first, prize_second, prize_third, ...legacyPayload } = payload;
+    // Graceful fallback: if database table is missing prize or rules columns, insert without them
+    if (error && (error.message?.includes('prize_') || error.message?.includes('lvl10') || error.message?.includes('faceit_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
+      const {
+        prize_first, prize_second, prize_third,
+        allow_lvl10, max_lvl10_per_team, min_faceit_level, max_faceit_level, min_faceit_elo, max_faceit_elo,
+        ...legacyPayload
+      } = payload;
       const retry = await supabase
         .from('tournaments')
         .insert(legacyPayload)
@@ -220,6 +230,12 @@ export async function createTournament(
         prize_first,
         prize_second,
         prize_third,
+        allow_lvl10,
+        max_lvl10_per_team,
+        min_faceit_level,
+        max_faceit_level,
+        min_faceit_elo,
+        max_faceit_elo,
       };
     } else if (error) {
       throw error;
@@ -253,8 +269,12 @@ export async function updateTournament(
       .update(updates)
       .eq('id', id);
 
-    if (error && (error.message?.includes('prize_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
-      const { prize_first, prize_second, prize_third, ...legacyUpdates } = updates as any;
+    if (error && (error.message?.includes('prize_') || error.message?.includes('lvl10') || error.message?.includes('faceit_') || error.message?.includes("column of 'tournaments'") || error.code === 'PGRST204')) {
+      const {
+        prize_first, prize_second, prize_third,
+        allow_lvl10, max_lvl10_per_team, min_faceit_level, max_faceit_level, min_faceit_elo, max_faceit_elo,
+        ...legacyUpdates
+      } = updates as any;
       const retry = await supabase
         .from('tournaments')
         .update(legacyUpdates)
@@ -394,6 +414,22 @@ export async function cancelTeamRegistration(teamId: string) {
   if (supabase) {
     const { error } = await supabase.from('teams').delete().eq('id', teamId);
     if (error) throw error;
+    return;
+  }
+
+  demoStore.teams = demoStore.teams.filter((t) => t.id !== teamId);
+  demoStore.save();
+}
+
+export async function adminDeleteTeam(teamId: string): Promise<void> {
+  if (supabase) {
+    const { error: rpcErr } = await supabase.rpc('admin_delete_team', { p_team_id: teamId });
+    if (!rpcErr) return;
+
+    // Fallback to direct table delete
+    const { error } = await supabase.from('teams').delete().eq('id', teamId);
+    if (error && !rpcErr) throw error;
+    if (error && rpcErr) throw new Error(rpcErr.message || error.message);
     return;
   }
 
@@ -737,6 +773,21 @@ export async function deleteLfgRequest(requestId: string): Promise<void> {
   demoStore.save();
 }
 
+export async function adminDeleteLfgRequest(requestId: string): Promise<void> {
+  if (supabase) {
+    const { error: rpcErr } = await supabase.rpc('admin_delete_lfg', { p_request_id: requestId });
+    if (!rpcErr) return;
+
+    const { error } = await supabase.from('lfg_requests').delete().eq('id', requestId);
+    if (error && !rpcErr) throw error;
+    if (error && rpcErr) throw new Error(rpcErr.message || error.message);
+    return;
+  }
+
+  demoStore.lfgRequests = (demoStore.lfgRequests || []).filter((r: any) => r.id !== requestId);
+  demoStore.save();
+}
+
 export async function removeLfgRequestForUser(tournamentId: string, userIdOrSteamId: string): Promise<void> {
   if (!userIdOrSteamId) return;
 
@@ -885,77 +936,128 @@ export async function respondToTeamJoinRequest(
   const maxMembers = tournamentFormat === '1x1' ? 1 : tournamentFormat === '2x2' ? 2 : 5;
 
   if (supabase) {
+    // 1. Try calling atomic RPC in Supabase first
     try {
-      // 1. Fetch the request
-      const { data: req, error: reqErr } = await supabase
-        .from('team_join_requests')
-        .select('*')
-        .eq('id', requestId)
-        .single();
+      const { error: rpcErr } = await supabase.rpc('respond_to_team_join_request', {
+        p_request_id: requestId,
+        p_action: action,
+        p_format: tournamentFormat,
+      });
 
-      if (reqErr || !req) throw reqErr || new Error('Запрос не найден');
-
-      if (action === 'reject') {
-        await supabase
-          .from('team_join_requests')
-          .update({ status: 'rejected', updated_at: new Date().toISOString() })
-          .eq('id', requestId);
+      if (!rpcErr) {
         return;
       }
 
-      // Action is 'accept': Check current member capacity
-      const { data: currentMembers } = await supabase
-        .from('team_members')
-        .select('id')
-        .eq('team_id', req.team_id);
-
-      const currentCount = currentMembers ? currentMembers.length : 0;
-      if (currentCount >= maxMembers) {
-        await supabase
-          .from('team_join_requests')
-          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-          .eq('id', requestId);
-        throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников). Свободных мест больше нет.`);
+      // If error is an intentional business logic exception, rethrow it directly to the user!
+      if (
+        rpcErr.message &&
+        !rpcErr.message.includes('Could not find the function') &&
+        rpcErr.code !== 'PGRST202'
+      ) {
+        throw new Error(rpcErr.message);
       }
-
-      // Add to team members
-      const { error: insErr } = await supabase.from('team_members').insert({
-        team_id: req.team_id,
-        steam_id: req.steam_id,
-        faceit_nickname: req.nickname,
-        faceit_level: req.faceit_level,
-        faceit_elo: req.faceit_elo,
-        is_captain: false,
-      });
-      if (insErr) throw insErr;
-
-      // Mark request accepted
-      await supabase
-        .from('team_join_requests')
-        .update({ status: 'accepted', updated_at: new Date().toISOString() })
-        .eq('id', requestId);
-
-      // Remove applicant's LFG request so it disappears from "Поиск тиммейтов"
-      await removeLfgRequestForUser(req.tournament_id, req.user_id);
-      if (req.steam_id) {
-        await removeLfgRequestForUser(req.tournament_id, req.steam_id);
-      }
-
-      // If team is now completely full, cancel other pending invites/applications for this team
-      if (currentCount + 1 >= maxMembers) {
-        await supabase
-          .from('team_join_requests')
-          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-          .eq('team_id', req.team_id)
-          .eq('status', 'pending');
-      }
-
-      return;
     } catch (err: any) {
-      if (err.message && err.message.includes('укомплектована')) {
+      if (err.message && !err.message.includes('Could not find the function') && err.code !== 'PGRST202') {
         throw err;
       }
-      console.warn('respondToTeamJoinRequest Supabase notice:', err);
+    }
+
+    // 2. Fallback direct table updates in Supabase
+    try {
+      const { data: req, error: reqErr } = await supabase
+        .from('team_join_requests')
+        .select('*, team:teams(*), tournament:tournaments(*)')
+        .eq('id', requestId)
+        .single();
+
+      if (!reqErr && req) {
+        if (action === 'reject') {
+          await supabase
+            .from('team_join_requests')
+            .update({ status: 'rejected', updated_at: new Date().toISOString() })
+            .eq('id', requestId);
+          return;
+        }
+
+        // Check blacklist
+        const banCheck = await checkIsUserBanned({
+          userId: req.user_id,
+          steamId: req.steam_id,
+          tournamentId: req.tournament_id,
+        });
+        if (banCheck.isBanned) {
+          throw new Error(`Игрок не может быть принят: ${banCheck.reason || 'в черном списке'}`);
+        }
+
+        // Check tournament rules
+        if (req.tournament) {
+          const ruleCheck = validateFaceitTournamentRules(
+            req.tournament,
+            {
+              faceit_level: req.faceit_level,
+              faceit_elo: req.faceit_elo,
+              nickname: req.nickname,
+            },
+            req.team?.members || []
+          );
+          if (!ruleCheck.valid) {
+            throw new Error(ruleCheck.error);
+          }
+        }
+
+        // Check member capacity
+        const { data: currentMembers } = await supabase
+          .from('team_members')
+          .select('id')
+          .eq('team_id', req.team_id);
+
+        const currentCount = currentMembers ? currentMembers.length : 0;
+        if (currentCount >= maxMembers) {
+          await supabase
+            .from('team_join_requests')
+            .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+            .eq('id', requestId);
+          throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников).`);
+        }
+
+        // Add to team members
+        const { error: insErr } = await supabase.from('team_members').insert({
+          team_id: req.team_id,
+          steam_id: req.steam_id,
+          faceit_nickname: req.nickname,
+          faceit_level: req.faceit_level,
+          faceit_elo: req.faceit_elo,
+          is_captain: false,
+        });
+        if (insErr) throw insErr;
+
+        // Mark request accepted
+        await supabase
+          .from('team_join_requests')
+          .update({ status: 'accepted', updated_at: new Date().toISOString() })
+          .eq('id', requestId);
+
+        // Remove applicant's LFG request
+        await removeLfgRequestForUser(req.tournament_id, req.user_id);
+        if (req.steam_id) {
+          await removeLfgRequestForUser(req.tournament_id, req.steam_id);
+        }
+
+        if (currentCount + 1 >= maxMembers) {
+          await supabase
+            .from('team_join_requests')
+            .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+            .eq('team_id', req.team_id)
+            .eq('status', 'pending');
+        }
+
+        return;
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('укомплектована') || err.message.includes('Faceit') || err.message.includes('списке') || err.message.includes('лимит') || err.message.includes('запрещ'))) {
+        throw err;
+      }
+      console.warn('respondToTeamJoinRequest direct notice:', err);
     }
   }
 
@@ -969,13 +1071,39 @@ export async function respondToTeamJoinRequest(
     return;
   }
 
-  // Check team capacity in demoStore
+  // Blacklist check in demo store
+  const banCheck = await checkIsUserBanned({
+    userId: req.user_id,
+    steamId: req.steam_id,
+    tournamentId: req.tournament_id,
+  });
+  if (banCheck.isBanned) {
+    throw new Error(`Игрок не может быть принят: ${banCheck.reason || 'в черном списке'}`);
+  }
+
+  const tournament = demoStore.tournaments.find((t) => t.id === req.tournament_id);
   const team = demoStore.teams.find((t) => t.id === req.team_id);
   const currentCount = team?.members ? team.members.length : 1;
+
   if (currentCount >= maxMembers) {
     req.status = 'cancelled';
     demoStore.save();
-    throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников). Свободных мест больше нет.`);
+    throw new Error(`Команда уже полностью укомплектована (максимум ${maxMembers} участников).`);
+  }
+
+  if (tournament) {
+    const ruleCheck = validateFaceitTournamentRules(
+      tournament,
+      {
+        faceit_level: req.faceit_level,
+        faceit_elo: req.faceit_elo,
+        nickname: req.nickname,
+      },
+      team?.members || []
+    );
+    if (!ruleCheck.valid) {
+      throw new Error(ruleCheck.error);
+    }
   }
 
   if (team) {
@@ -992,12 +1120,10 @@ export async function respondToTeamJoinRequest(
   }
 
   req.status = 'accepted';
-  // Remove from demo LFG
   demoStore.lfgRequests = demoStore.lfgRequests.filter(
     (lfg) => !(lfg.tournament_id === req.tournament_id && (lfg.user_id === req.user_id || lfg.steam_id === req.steam_id))
   );
 
-  // If team now full, cancel remaining pending
   if (team && team.members && team.members.length >= maxMembers) {
     demoStore.teamJoinRequests.forEach((r) => {
       if (r.team_id === team.id && r.status === 'pending') {
@@ -1007,5 +1133,213 @@ export async function respondToTeamJoinRequest(
   }
 
   demoStore.save();
+}
+
+// ==============================================================================
+// BLACKLIST / BANS MANAGEMENT
+// ==============================================================================
+
+export async function fetchBlacklist(tournamentId?: string): Promise<TournamentBlacklistEntry[]> {
+  if (supabase) {
+    try {
+      let query = supabase
+        .from('tournament_blacklist')
+        .select('*, user:profiles!tournament_blacklist_user_id_fkey(*), banner:profiles!tournament_blacklist_banned_by_fkey(*)');
+
+      if (tournamentId) {
+        query = query.or(`tournament_id.is.null,tournament_id.eq.${tournamentId}`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (!error && data) return data as TournamentBlacklistEntry[];
+    } catch (e) {
+      console.warn('Fallback fetchBlacklist to local:', e);
+    }
+  }
+
+  return (demoStore.blacklist || []).filter((b) => {
+    if (!tournamentId) return true;
+    return !b.tournament_id || b.tournament_id === tournamentId;
+  });
+}
+
+export async function addToBlacklist(entry: {
+  userId?: string | null;
+  steamId?: string | null;
+  discordUsername?: string | null;
+  reason?: string | null;
+  tournamentId?: string | null;
+  bannedBy: string;
+}): Promise<TournamentBlacklistEntry> {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('tournament_blacklist')
+        .insert({
+          user_id: entry.userId || null,
+          steam_id: entry.steamId?.trim() || null,
+          discord_username: entry.discordUsername?.trim() || null,
+          reason: entry.reason?.trim() || null,
+          tournament_id: entry.tournamentId || null,
+          banned_by: entry.bannedBy,
+        })
+        .select()
+        .single();
+
+      if (!error && data) return data as TournamentBlacklistEntry;
+      if (error) console.warn('Supabase addToBlacklist notice:', error.message);
+    } catch (e) {
+      console.warn('Supabase addToBlacklist fallback to local:', e);
+    }
+  }
+
+  const newBan: TournamentBlacklistEntry = {
+    id: `ban-${Date.now()}`,
+    user_id: entry.userId || null,
+    steam_id: entry.steamId?.trim() || null,
+    discord_username: entry.discordUsername?.trim() || null,
+    reason: entry.reason?.trim() || null,
+    tournament_id: entry.tournamentId || null,
+    banned_by: entry.bannedBy,
+    created_at: new Date().toISOString(),
+  };
+
+  demoStore.blacklist = [newBan, ...(demoStore.blacklist || [])];
+  demoStore.save();
+  return newBan;
+}
+
+export async function removeFromBlacklist(banId: string): Promise<void> {
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('tournament_blacklist').delete().eq('id', banId);
+      if (!error) return;
+    } catch (e) {
+      console.warn('Supabase removeFromBlacklist fallback to local:', e);
+    }
+  }
+
+  demoStore.blacklist = (demoStore.blacklist || []).filter((b) => b.id !== banId);
+  demoStore.save();
+}
+
+export async function checkIsUserBanned(options: {
+  userId?: string | null;
+  steamId?: string | null;
+  tournamentId?: string | null;
+}): Promise<{ isBanned: boolean; reason?: string | null }> {
+  const bans = await fetchBlacklist(options.tournamentId || undefined);
+  const ban = bans.find((b) => {
+    const matchUser = options.userId && b.user_id && b.user_id === options.userId;
+    const matchSteam = options.steamId && b.steam_id && b.steam_id === options.steamId;
+    return matchUser || matchSteam;
+  });
+
+  if (ban) {
+    return {
+      isBanned: true,
+      reason: ban.reason || (ban.tournament_id ? 'Запрет на участие в этом турнире' : 'Внесен в черный список турниров'),
+    };
+  }
+  return { isBanned: false };
+}
+
+// ==============================================================================
+// TOURNAMENT FACEIT RULES VALIDATOR
+// ==============================================================================
+
+export function validateFaceitTournamentRules(
+  tournament: Tournament,
+  player: {
+    faceit_level?: number | null;
+    faceit_elo?: number | null;
+    nickname?: string;
+  },
+  existingTeamMembers: { faceit_level?: number | null }[] = []
+): { valid: boolean; error?: string } {
+  const lvl = player.faceit_level;
+  const elo = player.faceit_elo;
+  const name = player.nickname || 'Игрок';
+
+  // 1. Allow lvl 10 check
+  if (tournament.allow_lvl10 === false && lvl === 10) {
+    return {
+      valid: false,
+      error: `На турнире запрещено участие игроков 10 уровня Faceit (${name} имеет 10 lvl).`,
+    };
+  }
+
+  // 2. Max Faceit ELO check (e.g. 2500, 3000 ELO limit)
+  if (
+    tournament.max_faceit_elo !== null &&
+    tournament.max_faceit_elo !== undefined &&
+    elo !== null &&
+    elo !== undefined &&
+    elo > tournament.max_faceit_elo
+  ) {
+    return {
+      valid: false,
+      error: `Faceit ELO игрока ${name} (${elo} ELO) превышает установленный регламентом турнира максимум (${tournament.max_faceit_elo} ELO).`,
+    };
+  }
+
+  // 3. Min Faceit ELO check
+  if (
+    tournament.min_faceit_elo !== null &&
+    tournament.min_faceit_elo !== undefined &&
+    elo !== null &&
+    elo !== undefined &&
+    elo < tournament.min_faceit_elo
+  ) {
+    return {
+      valid: false,
+      error: `Faceit ELO игрока ${name} (${elo} ELO) ниже минимального порога турнира (${tournament.min_faceit_elo} ELO).`,
+    };
+  }
+
+  // 4. Max Faceit Level check
+  if (
+    tournament.max_faceit_level !== null &&
+    tournament.max_faceit_level !== undefined &&
+    lvl !== null &&
+    lvl !== undefined &&
+    lvl > tournament.max_faceit_level
+  ) {
+    return {
+      valid: false,
+      error: `Уровень Faceit игрока ${name} (${lvl} lvl) выше максимально допустимого регламентом (${tournament.max_faceit_level} lvl).`,
+    };
+  }
+
+  // 5. Min Faceit Level check
+  if (
+    tournament.min_faceit_level !== null &&
+    tournament.min_faceit_level !== undefined &&
+    lvl !== null &&
+    lvl !== undefined &&
+    lvl < tournament.min_faceit_level
+  ) {
+    return {
+      valid: false,
+      error: `Уровень Faceit игрока ${name} (${lvl} lvl) ниже минимально допустимого регламентом (${tournament.min_faceit_level} lvl).`,
+    };
+  }
+
+  // 6. Max lvl 10 players in one team
+  if (
+    tournament.max_lvl10_per_team !== null &&
+    tournament.max_lvl10_per_team !== undefined &&
+    lvl === 10
+  ) {
+    const currentLvl10Count = existingTeamMembers.filter((m) => m.faceit_level === 10).length;
+    if (currentLvl10Count >= tournament.max_lvl10_per_team) {
+      return {
+        valid: false,
+        error: `В команде уже достигнут максимум игроков 10 уровня Faceit (разрешено не более ${tournament.max_lvl10_per_team} в составе).`,
+      };
+    }
+  }
+
+  return { valid: true };
 }
 

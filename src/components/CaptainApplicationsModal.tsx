@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Tournament, Team, TeamJoinRequest } from '../types/database.types';
-import { respondToTeamJoinRequest } from '../lib/supabase';
+import { respondToTeamJoinRequest, validateFaceitTournamentRules } from '../lib/supabase';
 import { FaceitBadge } from './FaceitBadge';
 import {
   FileText,
@@ -10,7 +10,8 @@ import {
   AlertCircle,
   Loader2,
   Users,
-  MessageSquare
+  MessageSquare,
+  ShieldAlert
 } from 'lucide-react';
 
 interface CaptainApplicationsModalProps {
@@ -240,22 +241,76 @@ export const CaptainApplicationsModal: React.FC<CaptainApplicationsModalProps> =
                       </div>
                     )}
 
+                    {/* Faceit Rules Warning */}
+                    {(() => {
+                      const ruleCheck = validateFaceitTournamentRules(
+                        tournament,
+                        {
+                          faceit_level: app.faceit_level,
+                          faceit_elo: app.faceit_elo,
+                          nickname: app.nickname,
+                        },
+                        team.members || []
+                      );
+                      if (!ruleCheck.valid) {
+                        return (
+                          <div
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: '8px',
+                              padding: '0.5rem 0.75rem',
+                              fontSize: '0.78rem',
+                              color: '#f87171',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                            }}
+                          >
+                            <ShieldAlert size={14} style={{ flexShrink: 0 }} />
+                            <span>{ruleCheck.error}</span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+
                     {/* Actions: Accept or Reject */}
                     <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.25rem' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleAction(app.id, 'accept')}
-                        className="btn btn-primary btn-sm"
-                        disabled={isProcessing || isFull}
-                        style={{ flex: 1, justifyContent: 'center' }}
-                      >
-                        {isProcessing ? (
-                          <Loader2 size={14} className="spin-animate" />
-                        ) : (
-                          <Check size={15} />
-                        )}
-                        Принять в состав
-                      </button>
+                      {(() => {
+                        const ruleCheck = validateFaceitTournamentRules(
+                          tournament,
+                          {
+                            faceit_level: app.faceit_level,
+                            faceit_elo: app.faceit_elo,
+                            nickname: app.nickname,
+                          },
+                          team.members || []
+                        );
+                        const isRulesViolated = !ruleCheck.valid;
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleAction(app.id, 'accept')}
+                            className="btn btn-primary btn-sm"
+                            disabled={isProcessing || isFull || isRulesViolated}
+                            style={{
+                              flex: 1,
+                              justifyContent: 'center',
+                              opacity: isRulesViolated ? 0.5 : 1,
+                            }}
+                            title={isRulesViolated ? ruleCheck.error : undefined}
+                          >
+                            {isProcessing ? (
+                              <Loader2 size={14} className="spin-animate" />
+                            ) : (
+                              <Check size={15} />
+                            )}
+                            Принять в состав
+                          </button>
+                        );
+                      })()}
 
                       <button
                         type="button"

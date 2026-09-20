@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import type { Tournament, Team, Profile } from '../types/database.types';
-import { createTeamJoinRequest } from '../lib/supabase';
+import { createTeamJoinRequest, checkIsUserBanned, validateFaceitTournamentRules } from '../lib/supabase';
 import { lookupFaceitPlayer } from '../lib/faceit';
 import { FaceitBadge } from './FaceitBadge';
-import { UserPlus, AlertCircle, Check, Loader2, X, Search } from 'lucide-react';
+import { UserPlus, AlertCircle, Check, Loader2, X, Search, ShieldAlert } from 'lucide-react';
 
 interface TeamApplicationModalProps {
   tournament: Tournament;
@@ -71,6 +71,34 @@ export const TeamApplicationModal: React.FC<TeamApplicationModalProps> = ({
     setError(null);
 
     try {
+      // 1. Blacklist check
+      const banCheck = await checkIsUserBanned({
+        userId: currentUser.id,
+        steamId: cleanSteam,
+        tournamentId: tournament.id,
+      });
+      if (banCheck.isBanned) {
+        setError(`Вы не можете подавать заявки: ${banCheck.reason || 'в черном списке'}`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Faceit rules check
+      const validation = validateFaceitTournamentRules(
+        tournament,
+        {
+          faceit_level: faceitLevel,
+          faceit_elo: faceitElo,
+          nickname: nickname.trim(),
+        },
+        team.members || []
+      );
+      if (!validation.valid) {
+        setError(validation.error || 'Нарушение правил Faceit для турнира');
+        setIsSubmitting(false);
+        return;
+      }
+
       await createTeamJoinRequest({
         tournament_id: tournament.id,
         team_id: team.id,
@@ -151,6 +179,37 @@ export const TeamApplicationModal: React.FC<TeamApplicationModalProps> = ({
                 <div className="alert-box alert-error">
                   <AlertCircle size={16} />
                   <span>{error}</span>
+                </div>
+              )}
+
+              {/* Tournament Rules Banner */}
+              {(tournament.allow_lvl10 === false || tournament.max_lvl10_per_team || tournament.max_faceit_elo || (tournament.min_faceit_level && tournament.min_faceit_level > 1) || (tournament.max_faceit_level && tournament.max_faceit_level < 10)) && (
+                <div
+                  style={{
+                    background: 'rgba(255, 85, 0, 0.08)',
+                    border: '1px solid rgba(255, 85, 0, 0.25)',
+                    borderRadius: '8px',
+                    padding: '0.6rem 0.85rem',
+                    fontSize: '0.78rem',
+                  }}
+                >
+                  <div style={{ color: '#ff7733', fontWeight: 700, marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <ShieldAlert size={13} /> Регламент турнира:
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                    {tournament.allow_lvl10 === false && (
+                      <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>🚫 Без 10 lvl</span>
+                    )}
+                    {tournament.allow_lvl10 !== false && tournament.max_lvl10_per_team && (
+                      <span className="badge" style={{ background: 'rgba(255, 85, 0, 0.2)', color: '#ffaa66' }}>⭐ Макс. {tournament.max_lvl10_per_team}x 10 lvl</span>
+                    )}
+                    {tournament.max_faceit_elo && (
+                      <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd' }}>⚡ До {tournament.max_faceit_elo} ELO</span>
+                    )}
+                    {((tournament.min_faceit_level && tournament.min_faceit_level > 1) || (tournament.max_faceit_level && tournament.max_faceit_level < 10)) && (
+                      <span className="badge badge-format">🎯 {tournament.min_faceit_level || 1}-{tournament.max_faceit_level || 10} lvl</span>
+                    )}
+                  </div>
                 </div>
               )}
 

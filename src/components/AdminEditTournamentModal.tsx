@@ -28,6 +28,22 @@ export const AdminEditTournamentModal: React.FC<AdminEditTournamentModalProps> =
   const [prizeSecond, setPrizeSecond] = useState(tournament.prize_second || '');
   const [prizeThird, setPrizeThird] = useState(tournament.prize_third || '');
 
+  // Faceit Rules
+  const [allowLvl10, setAllowLvl10] = useState(tournament.allow_lvl10 !== false);
+  const [maxLvl10PerTeam, setMaxLvl10PerTeam] = useState<string>(
+    tournament.max_lvl10_per_team !== null && tournament.max_lvl10_per_team !== undefined
+      ? String(tournament.max_lvl10_per_team)
+      : ''
+  );
+  const [minFaceitLevel, setMinFaceitLevel] = useState<number>(tournament.min_faceit_level || 1);
+  const [maxFaceitLevel, setMaxFaceitLevel] = useState<number>(tournament.max_faceit_level || 10);
+  const [maxFaceitElo, setMaxFaceitElo] = useState<string>(
+    tournament.max_faceit_elo ? String(tournament.max_faceit_elo) : ''
+  );
+  const [minFaceitElo, setMinFaceitElo] = useState<string>(
+    tournament.min_faceit_elo ? String(tournament.min_faceit_elo) : ''
+  );
+
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +57,11 @@ export const AdminEditTournamentModal: React.FC<AdminEditTournamentModalProps> =
       return;
     }
 
+    if (minFaceitLevel > maxFaceitLevel) {
+      setError('Минимальный уровень Faceit не может быть больше максимального уровня.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       await updateTournament(tournament.id, {
@@ -51,6 +72,12 @@ export const AdminEditTournamentModal: React.FC<AdminEditTournamentModalProps> =
         prize_first: prizeFirst.trim() || null,
         prize_second: prizeSecond.trim() || null,
         prize_third: prizeThird.trim() || null,
+        allow_lvl10: allowLvl10,
+        max_lvl10_per_team: !allowLvl10 ? 0 : (maxLvl10PerTeam ? parseInt(maxLvl10PerTeam, 10) : null),
+        min_faceit_level: minFaceitLevel,
+        max_faceit_level: maxFaceitLevel,
+        min_faceit_elo: minFaceitElo.trim() ? parseInt(minFaceitElo.trim(), 10) : null,
+        max_faceit_elo: maxFaceitElo.trim() ? parseInt(maxFaceitElo.trim(), 10) : null,
       });
 
       onUpdated();
@@ -163,6 +190,125 @@ export const AdminEditTournamentModal: React.FC<AdminEditTournamentModalProps> =
                   onChange={(e) => setTournStart(e.target.value)}
                   required
                 />
+              </div>
+            </div>
+
+            {/* Flexible Faceit Rules Section */}
+            <div
+              style={{
+                background: 'rgba(255, 85, 0, 0.04)',
+                border: '1px solid rgba(255, 85, 0, 0.25)',
+                borderRadius: '12px',
+                padding: '1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.85rem',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ background: '#ff5500', color: '#000', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>FACEIT</span>
+                  Регламент Faceit и ограничения состава
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Лимиты 10 уровня, диапазон уровней и порог максимального ELO.
+                </div>
+              </div>
+
+              {/* 10 LVL Switcher & Limit */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Игроки 10 уровня Faceit</label>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setAllowLvl10(true)}
+                      className={`btn ${allowLvl10 ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      Разрешены
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAllowLvl10(false);
+                        setMaxLvl10PerTeam('0');
+                      }}
+                      className={`btn ${!allowLvl10 ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      Запрет 10 lvl
+                    </button>
+                  </div>
+                </div>
+
+                {allowLvl10 && tournament.format !== '1x1' && (
+                  <div className="form-group">
+                    <label className="form-label">Максимум 10 lvl в команде</label>
+                    <select
+                      className="form-input"
+                      value={maxLvl10PerTeam}
+                      onChange={(e) => setMaxLvl10PerTeam(e.target.value)}
+                    >
+                      <option value="">Без ограничений</option>
+                      <option value="1">Не более 1 игрока (1x 10 lvl)</option>
+                      <option value="2">Не более 2 игроков (2x 10 lvl)</option>
+                      {tournament.format === '5x5' && <option value="3">Не более 3 игроков (3x 10 lvl)</option>}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Levels range */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Мин. уровень Faceit (1-10)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min={1}
+                    max={10}
+                    value={minFaceitLevel}
+                    onChange={(e) => setMinFaceitLevel(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Макс. уровень Faceit (1-10)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min={1}
+                    max={10}
+                    value={maxFaceitLevel}
+                    onChange={(e) => setMaxFaceitLevel(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 10)))}
+                  />
+                </div>
+              </div>
+
+              {/* ELO limits */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Макс. Faceit ELO (отсечь 3500+)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="напр. 2500 или 3000 (пусто = без лимита)"
+                    value={maxFaceitElo}
+                    onChange={(e) => setMaxFaceitElo(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Мин. Faceit ELO (опционально)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="напр. 1000 (пусто = без лимита)"
+                    value={minFaceitElo}
+                    onChange={(e) => setMinFaceitElo(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
 

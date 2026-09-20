@@ -4,11 +4,15 @@ import {
   fetchLfgRequests,
   createLfgRequest,
   deleteLfgRequest,
+  adminDeleteLfgRequest,
   createTeamJoinRequest,
   updateLfgSteamId,
+  checkIsUserBanned,
+  validateFaceitTournamentRules,
 } from '../lib/supabase';
 import { lookupFaceitPlayer } from '../lib/faceit';
 import { FaceitBadge } from './FaceitBadge';
+import { AdminBlacklistModal } from './AdminBlacklistModal';
 import {
   Users,
   Plus,
@@ -22,7 +26,8 @@ import {
   UserPlus,
   MessageSquare,
   Mail,
-  X
+  X,
+  Ban,
 } from 'lucide-react';
 
 interface TeammateFinderProps {
@@ -52,6 +57,9 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [copiedInviteText, setCopiedInviteText] = useState(false);
+  const [banTarget, setBanTarget] = useState<{ steamId: string; discordTag: string } | null>(null);
+
+  const isModerator = Boolean(currentUser?.is_admin || tournament.created_by === currentUser?.id);
 
   // Form State for creating LFG request
   const [nickname, setNickname] = useState(currentUser?.discord_username || '');
@@ -108,6 +116,18 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
     setIsSubmitting(true);
     setError(null);
 
+    // 1. Blacklist check
+    const banCheck = await checkIsUserBanned({
+      userId: currentUser.id,
+      steamId: steamId.trim(),
+      tournamentId: tournament.id,
+    });
+    if (banCheck.isBanned) {
+      setError(`Вы не можете подавать анкету на этот турнир: ${banCheck.reason || 'в черном списке'}`);
+      setIsSubmitting(false);
+      return;
+    }
+
     let faceitLevel: number | null = null;
     let faceitElo: number | null = null;
     try {
@@ -115,6 +135,18 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
       faceitLevel = lookup.faceit_level || null;
       faceitElo = lookup.faceit_elo || null;
     } catch {}
+
+    // 2. Faceit rules check
+    const ruleCheck = validateFaceitTournamentRules(tournament, {
+      faceit_level: faceitLevel,
+      faceit_elo: faceitElo,
+      nickname: nickname.trim(),
+    });
+    if (!ruleCheck.valid) {
+      setError(ruleCheck.error || 'Нарушение правил Faceit для турнира');
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       await createLfgRequest({
@@ -150,6 +182,16 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
     }
   };
 
+  const handleAdminDelete = async (requestId: string, playerNick: string) => {
+    if (!confirm(`Удалить анкету игрока «${playerNick}» из поиска тиммейтов (модерация)?`)) return;
+    try {
+      await adminDeleteLfgRequest(requestId);
+      await loadRequests();
+    } catch (err) {
+      alert('Ошибка при удалении анкеты: ' + (err as Error).message);
+    }
+  };
+
   const handleSendInviteToPlayer = async (targetPlayer: LfgRequest, targetSteamId: string) => {
     if (!userTeam) return;
     const cleanSteam = targetSteamId.trim();
@@ -171,6 +213,22 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
         if (l.faceit_elo) faceitElo = l.faceit_elo;
         if (l.faceit_nickname) faceitNick = l.faceit_nickname;
       } catch {}
+
+      // Validate tournament Faceit rules for this team before sending invite!
+      const validation = validateFaceitTournamentRules(
+        tournament,
+        {
+          faceit_level: faceitLevel,
+          faceit_elo: faceitElo,
+          nickname: faceitNick || targetPlayer.nickname,
+        },
+        userTeam.members || []
+      );
+      if (!validation.valid) {
+        setInviteError(validation.error || 'Игрок не проходит по регламенту турнира');
+        setIsInviting(false);
+        return;
+      }
 
       // If the LFG card did not have steam_id before, update it now so it persists permanently!
       if (!targetPlayer.steam_id) {
@@ -385,7 +443,7 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                     </div>
                   </div>
 
-                  {isMe && (
+                  {isMe ? (
                     <button
                       onClick={() => handleDelete(r.id)}
                       className="btn btn-secondary btn-sm"
@@ -394,7 +452,26 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
                     >
                       <Trash2 size={13} />
                     </button>
-                  )}
+                  ) : isModerator ? (
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        onClick={() => setBanTarget({ steamId: r.steam_id || '', discordTag: r.discord_tag })}
+                        className="btn btn-secondary btn-sm"
+                        title="В черный список (Бан)"
+                        style={{ padding: '0.35rem 0.45rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                      >
+                        <Ban size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleAdminDelete(r.id, r.nickname)}
+                        className="btn btn-secondary btn-sm"
+                        title="Удалить анкету игрока (Модерация)"
+                        style={{ padding: '0.35rem 0.45rem', color: '#f87171' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 {r.description && (
@@ -723,6 +800,18 @@ export const TeammateFinder: React.FC<TeammateFinderProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Admin Blacklist Modal from Card */}
+      {banTarget && currentUser && (
+        <AdminBlacklistModal
+          tournament={tournament}
+          currentUser={currentUser}
+          initialSteamId={banTarget.steamId}
+          initialDiscordTag={banTarget.discordTag}
+          onClose={() => setBanTarget(null)}
+          onUpdated={loadRequests}
+        />
       )}
     </div>
   );

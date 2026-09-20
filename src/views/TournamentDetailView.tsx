@@ -7,6 +7,7 @@ import {
   fetchTeamJoinRequests,
   respondToTeamJoinRequest,
   removeTeamMember,
+  adminDeleteTeam,
 } from '../lib/supabase';
 import { BracketTree } from '../components/BracketTree';
 import { AdminControls } from '../components/AdminControls';
@@ -15,6 +16,7 @@ import { TeammateFinder } from '../components/TeammateFinder';
 import { FaceitBadge } from '../components/FaceitBadge';
 import { TeamApplicationModal } from '../components/TeamApplicationModal';
 import { CaptainApplicationsModal } from '../components/CaptainApplicationsModal';
+import { AdminBlacklistModal } from '../components/AdminBlacklistModal';
 import { useAuth } from '../context/AuthContext';
 import { formatTournamentDateTime, getEffectiveTournamentStatus } from '../lib/dateUtils';
 import {
@@ -34,6 +36,7 @@ import {
   X,
   FileText,
   Trash2,
+  Ban,
 } from 'lucide-react';
 
 interface TournamentDetailViewProps {
@@ -54,6 +57,11 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
   const [selectedTeamToApply, setSelectedTeamToApply] = useState<Team | null>(null);
   const [showCaptainAppsModal, setShowCaptainAppsModal] = useState(false);
   const [isRespondingInvite, setIsRespondingInvite] = useState(false);
+  const [showBlacklistModal, setShowBlacklistModal] = useState(false);
+  const [blacklistTarget, setBlacklistTarget] = useState<{
+    steamId?: string;
+    discordTag?: string;
+  } | null>(null);
 
   const loadDetails = async () => {
     setIsLoading(true);
@@ -175,6 +183,18 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
     }
   };
 
+  const isModerator = Boolean(isAdmin || (user && tournament.created_by === user.id));
+
+  const handleAdminDeleteTeam = async (teamId: string, teamName: string) => {
+    if (!confirm(`Вы точно хотите удалить команду «${teamName}» с турнира? Слот освободится.`)) return;
+    try {
+      await adminDeleteTeam(teamId);
+      await loadDetails();
+    } catch (err: any) {
+      alert('Ошибка при удалении команды: ' + (err.message || 'Не удалось удалить команду'));
+    }
+  };
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -199,6 +219,26 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
               <span className="badge badge-upcoming">
                 {teams.length} / {tournament.bracket_size} слотов
               </span>
+              {tournament.allow_lvl10 === false && (
+                <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                  🚫 Без 10 lvl
+                </span>
+              )}
+              {tournament.allow_lvl10 !== false && tournament.max_lvl10_per_team && (
+                <span className="badge" style={{ background: 'rgba(234, 88, 12, 0.15)', color: '#fb923c', border: '1px solid rgba(234, 88, 12, 0.3)' }}>
+                  ⭐ Макс. {tournament.max_lvl10_per_team}x 10 lvl
+                </span>
+              )}
+              {tournament.max_faceit_elo && (
+                <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                  ⚡ До {tournament.max_faceit_elo} ELO
+                </span>
+              )}
+              {(tournament.min_faceit_level || tournament.max_faceit_level) && (
+                <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                  🎯 {tournament.min_faceit_level || 1}–{tournament.max_faceit_level || 10} lvl
+                </span>
+              )}
             </div>
 
             <h1 className="detail-title">{tournament.title}</h1>
@@ -403,6 +443,58 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
         </div>
       )}
 
+      {/* Incoming Applications Banner for Team Captain */}
+      {captainPendingApps.length > 0 && (
+        <div
+          style={{
+            background: 'rgba(250, 204, 21, 0.08)',
+            border: '1px solid rgba(250, 204, 21, 0.4)',
+            borderRadius: '14px',
+            padding: '1rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                background: 'rgba(250, 204, 21, 0.2)',
+                color: '#facc15',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <FileText size={22} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1.02rem', color: 'var(--text-primary)' }}>
+                Новые заявки в вашу команду ({captainPendingApps.length})!
+              </div>
+              <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                Игроки хотят вступить в состав команды <strong style={{ color: '#facc15' }}>«{captainTeam?.name}»</strong>. Проверьте их профили Faceit и примите или отклоните.
+              </div>
+            </div>
+          </div>
+
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowCaptainAppsModal(true)}
+            style={{ background: '#facc15', color: '#000', fontWeight: 700, border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <FileText size={15} />
+            Открыть заявки ({captainPendingApps.length})
+          </button>
+        </div>
+      )}
+
       {isAdmin && (
         <AdminControls
           tournament={tournament}
@@ -424,9 +516,25 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
         <button
           className={`btn ${activeTab === 'teams' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
           onClick={() => setActiveTab('teams')}
+          style={{ display: 'inline-flex', alignItems: 'center' }}
         >
           <Users size={15} />
           Участники и команды ({teams.length})
+          {captainPendingApps.length > 0 && (
+            <span
+              style={{
+                background: '#facc15',
+                color: '#000',
+                borderRadius: '10px',
+                padding: '0.1rem 0.45rem',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                marginLeft: '0.4rem',
+              }}
+            >
+              +{captainPendingApps.length}
+            </span>
+          )}
         </button>
         <button
           className={`btn ${activeTab === 'lfg' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
@@ -488,7 +596,7 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                       gap: '0.75rem',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                         <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--md-primary)', fontSize: '1rem' }}>
                           #{t.bracket_position || idx + 1}
@@ -497,9 +605,22 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                           {t.name}
                         </h4>
                       </div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        Капитан: {t.captain?.discord_username || 'Игрок'}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          Капитан: {t.captain?.discord_username || 'Игрок'}
+                        </span>
+                        {isModerator && (
+                          <button
+                            onClick={() => handleAdminDeleteTeam(t.id, t.name || 'Без названия')}
+                            className="btn btn-secondary btn-sm"
+                            title="Снять команду с турнира (Организатор / Админ)"
+                            style={{ padding: '0.2rem 0.45rem', fontSize: '0.72rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                          >
+                            <Trash2 size={12} />
+                            Удалить
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Captain's Incoming Applications Button */}
@@ -544,7 +665,7 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                             <span style={{ fontWeight: 600 }}>{m.faceit_nickname || 'Steam Игрок'}</span>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             <a
                               href={`https://steamcommunity.com/profiles/${m.steam_id}`}
                               target="_blank"
@@ -553,6 +674,24 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                             >
                               SteamID <ExternalLink size={10} />
                             </a>
+
+                            {/* Moderator ban shortcut */}
+                            {isModerator && (
+                              <button
+                                onClick={() => {
+                                  setBlacklistTarget({
+                                    steamId: m.steam_id || undefined,
+                                    discordTag: m.faceit_nickname || undefined,
+                                  });
+                                  setShowBlacklistModal(true);
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                title="Внести игрока в черный список (бан)"
+                                style={{ padding: '0.2rem 0.35rem', color: '#fca5a5', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                              >
+                                <Ban size={12} />
+                              </button>
+                            )}
 
                             {/* Kick member button for captain */}
                             {isMyCaptainTeam && !m.is_captain && (
@@ -641,6 +780,21 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
           team={captainTeam}
           applications={joinRequests.filter((r) => r.team_id === captainTeam.id && r.type === 'application')}
           onClose={() => setShowCaptainAppsModal(false)}
+          onUpdated={loadDetails}
+        />
+      )}
+
+      {/* Modal: Admin Blacklist */}
+      {showBlacklistModal && user && isModerator && (
+        <AdminBlacklistModal
+          tournament={tournament}
+          currentUser={user}
+          initialSteamId={blacklistTarget?.steamId || ''}
+          initialDiscordTag={blacklistTarget?.discordTag || ''}
+          onClose={() => {
+            setShowBlacklistModal(false);
+            setBlacklistTarget(null);
+          }}
           onUpdated={loadDetails}
         />
       )}
