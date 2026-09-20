@@ -3,7 +3,7 @@ import type { Tournament, FaceitPlayerLookup, Profile } from '../types/database.
 import { lookupFaceitPlayer } from '../lib/faceit';
 import { registerTeamAtomic, checkIsUserBanned, validateFaceitTournamentRules } from '../lib/supabase';
 import { FaceitBadge } from './FaceitBadge';
-import { X, AlertCircle, Loader2, Users, Trophy, ShieldAlert } from 'lucide-react';
+import { X, AlertCircle, Loader2, Users, UserPlus, ShieldAlert } from 'lucide-react';
 
 interface RegistrationModalProps {
   tournament: Tournament;
@@ -241,7 +241,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
-            <Trophy size={20} color="#ff8e00" />
+            <UserPlus size={20} color="var(--md-primary)" />
             Заявка на турнир {tournament.format}
           </div>
           <button onClick={onClose} className="btn btn-secondary btn-sm" style={{ padding: '0.4rem' }}>

@@ -23,7 +23,6 @@ import {
   ArrowLeft,
   Calendar,
   Users,
-  Trophy,
   Shield,
   Layers,
   UserPlus,
@@ -284,7 +283,7 @@ export const TournamentDetailView: React.FC<TournamentDetailViewProps> = ({
                   className="btn btn-primary btn-sm"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                 >
-                  <Trophy size={15} />
+                  <UserPlus size={15} />
                   Подать заявку на турнир
                 </button>
               )

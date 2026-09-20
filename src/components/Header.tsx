@@ -1,7 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  Trophy,
   PlusCircle,
   LogIn,
   LogOut,
@@ -28,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
           {/* Brand: BAZA CS2 */}
           <div className="brand-logo" onClick={() => onNavigate('list')}>
             <div className="brand-icon">
-              <Trophy size={20} />
+              <img src="/favicon.svg" alt="BAZA CS2" style={{ width: '22px', height: '22px', display: 'block', objectFit: 'contain' }} />
             </div>
             <div className="brand-title">
               BAZA <span>CS2</span>

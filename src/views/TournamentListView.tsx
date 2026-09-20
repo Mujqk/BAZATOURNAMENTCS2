@@ -4,7 +4,7 @@ import { fetchTournaments } from '../lib/supabase';
 import { TournamentCard } from '../components/TournamentCard';
 import { RegistrationModal } from '../components/RegistrationModal';
 import { useAuth } from '../context/AuthContext';
-import { Trophy, Crosshair, Loader2, Globe, Send, MessageSquare } from 'lucide-react';
+import { PlusCircle, Crosshair, Loader2, Globe, Send, MessageSquare } from 'lucide-react';
 
 import { getEffectiveTournamentStatus } from '../lib/dateUtils';
 
@@ -87,7 +87,7 @@ export const TournamentListView: React.FC<TournamentListViewProps> = ({
             <div className="hero-actions">
               {isAdmin && (
                 <button onClick={onNavigateToCreate} className="btn btn-primary">
-                  <Trophy size={16} />
+                  <PlusCircle size={16} />
                   Создать турнир
                 </button>
               )}

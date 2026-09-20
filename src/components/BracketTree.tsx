@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import type { Match, Tournament, Team } from '../types/database.types';
 import { MatchNode } from './MatchNode';
-import { Trophy, Crown, Sparkles } from 'lucide-react';
+import { Layers, Crown, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface BracketTreeProps {
@@ -28,8 +28,8 @@ export const BracketTree: React.FC<BracketTreeProps> = ({
           border: '1px dashed var(--border-medium)',
         }}
       >
-        <Trophy size={48} color="var(--accent-orange)" style={{ opacity: 0.5, marginBottom: '1rem' }} />
-        <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', textTransform: 'uppercase' }}>
+        <Layers size={48} color="var(--md-primary)" style={{ opacity: 0.6, marginBottom: '1rem' }} />
+        <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem' }}>
           Сетка еще не сформирована
         </h3>
         <p style={{ color: 'var(--text-secondary)', maxWidth: '480px', margin: '0.5rem auto 1.5rem', fontSize: '0.92rem' }}>

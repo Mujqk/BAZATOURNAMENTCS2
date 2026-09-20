@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { TournamentFormat } from '../types/database.types';
 import { createTournament } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { ArrowLeft, Trophy, PlusCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, PlusCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 interface AdminCreateTournamentViewProps {
   onBack: () => void;
@@ -119,18 +119,13 @@ export const AdminCreateTournamentView: React.FC<AdminCreateTournamentViewProps>
           boxShadow: 'var(--shadow-md)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-          <div style={{ width: '40px', height: '40px', background: 'var(--accent-orange-gradient)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000' }}>
-            <Trophy size={22} />
-          </div>
-          <div>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.8rem', textTransform: 'uppercase' }}>
-              Создание турнира CS2
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-              Турнир появится на сайте со статусом «Скоро» и перейдет в регистрацию автоматически.
-            </p>
-          </div>
+        <div style={{ marginBottom: '1.75rem' }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+            Создание турнира CS2
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.35rem' }}>
+            Турнир появится на сайте со статусом «Скоро» и перейдет в регистрацию автоматически.
+          </p>
         </div>
 
         {error && (

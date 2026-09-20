@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Tournament } from '../types/database.types';
 import { updateTournament, deleteTournament } from '../lib/supabase';
-import { X, Trash2, Save, AlertCircle, Loader2, Trophy, Calendar } from 'lucide-react';
+import { X, Trash2, Save, AlertCircle, Loader2, Layers, Calendar } from 'lucide-react';
 
 interface AdminEditTournamentModalProps {
   tournament: Tournament;
@@ -121,7 +121,7 @@ export const AdminEditTournamentModal: React.FC<AdminEditTournamentModalProps> =
       >
         <div className="modal-header">
           <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Trophy size={20} color="var(--md-primary)" />
+            <Layers size={20} color="var(--md-primary)" />
             Редактирование турнира
           </div>
           <button onClick={onClose} className="btn btn-secondary btn-sm" style={{ padding: '0.4rem' }}>
